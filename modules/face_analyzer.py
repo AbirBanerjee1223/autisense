@@ -215,22 +215,33 @@ class FaceAnalyzer:
         ear = (vertical_1 + vertical_2) / (2.0 * horizontal)
         return ear
 
+    # 1. Update this function in modules/face_analyzer.py
     def _compute_gaze_direction(
         self,
         landmarks: np.ndarray,
         img_w: int,
-        img_h: int
+        img_h: int,
+        head_yaw: float,   # <-- ADDED PARAMETER
+        head_pitch: float  # <-- ADDED PARAMETER
     ) -> Tuple[str, bool]:
         """
-        Determine gaze direction using iris position
-        relative to eye corners.
+        Determine gaze using Head Pose as the primary anchor, 
+        falling back to iris tracking for micro-movements.
         """
-        # Check if iris landmarks exist (indices 468-477)
-        if len(landmarks) <= max(
-            max(self.LEFT_IRIS), max(self.RIGHT_IRIS)
-        ):
-            # No iris landmarks, use eye landmarks only
-            return "unknown", False
+        # 1. Primary Check: Head Pose (Bulletproof)
+        # If head is turned significantly, eye contact is broken.
+        if head_yaw > 18.0:
+            return "right (head turned)", False
+        elif head_yaw < -18.0:
+            return "left (head turned)", False
+        elif head_pitch > 20.0:
+            return "down (head lowered)", False
+        elif head_pitch < -20.0:
+            return "up (head raised)", False
+
+        # 2. Secondary Check: Iris Position
+        if len(landmarks) <= max(max(self.LEFT_IRIS), max(self.RIGHT_IRIS)):
+            return "center", True # Default to center if iris fails but head is straight
 
         left_iris_pts = landmarks[self.LEFT_IRIS]
         right_iris_pts = landmarks[self.RIGHT_IRIS]
@@ -243,31 +254,20 @@ class FaceAnalyzer:
         def iris_ratio(iris_center, eye_pts):
             eye_left_corner = eye_pts[0]
             eye_right_corner = eye_pts[3]
-            total_width = distance.euclidean(
-                eye_left_corner[:2], eye_right_corner[:2]
-            )
-            if total_width == 0:
-                return 0.5
-            iris_dist = distance.euclidean(
-                eye_left_corner[:2], iris_center[:2]
-            )
+            total_width = distance.euclidean(eye_left_corner[:2], eye_right_corner[:2])
+            if total_width == 0: return 0.5
+            iris_dist = distance.euclidean(eye_left_corner[:2], iris_center[:2])
             return iris_dist / total_width
 
-        left_ratio = iris_ratio(left_iris_center, left_eye_pts)
-        right_ratio = iris_ratio(right_iris_center, right_eye_pts)
-        avg_ratio = (left_ratio + right_ratio) / 2
+        avg_ratio = (iris_ratio(left_iris_center, left_eye_pts) + iris_ratio(right_iris_center, right_eye_pts)) / 2
 
-        if avg_ratio < 0.35:
-            direction = "right"
-            looking_at_camera = False
-        elif avg_ratio > 0.65:
-            direction = "left"
-            looking_at_camera = False
-        else:
-            direction = "center"
-            looking_at_camera = True
-
-        return direction, looking_at_camera
+        # Widened thresholds to account for webcam noise
+        if avg_ratio < 0.28:
+            return "right (eyes)", False
+        elif avg_ratio > 0.72:
+            return "left (eyes)", False
+        
+        return "center", True
 
     def _analyze_expression_blendshapes(
         self,
@@ -553,7 +553,7 @@ class FaceAnalyzer:
 
         # --- Gaze Direction ---
         direction, looking = self._compute_gaze_direction(
-            landmarks, img_w, img_h
+            landmarks, img_w, img_h, yaw, pitch
         )
         result.gaze.gaze_direction = direction
         result.gaze.is_looking_at_camera = looking

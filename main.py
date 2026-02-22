@@ -373,57 +373,29 @@ def start_screening_session():
 # =============================================
 # SCREENING PAGE
 # =============================================
+# Replace this function in main.py
 def render_screening_page(session_duration: int):
-    """Render the live screening interface."""
-    st.markdown(
-        '<h2 style="text-align:center;">🔴 Live Screening</h2>',
-        unsafe_allow_html=True
-    )
+    """Render the live screening interface with smooth video rendering."""
+    st.markdown('<h2 style="text-align:center;">🔴 Live Screening</h2>', unsafe_allow_html=True)
 
-    # Timer
-    elapsed = time.time() - st.session_state.session_start_time
-    remaining = max(0, session_duration - elapsed)
-
-    timer_col1, timer_col2, timer_col3 = st.columns(3)
-    with timer_col1:
-        st.metric(
-            "⏱️ Elapsed",
-            f"{int(elapsed)}s"
-        )
-    with timer_col2:
-        st.metric(
-            "⏳ Remaining",
-            f"{int(remaining)}s"
-        )
-    with timer_col3:
-        st.metric(
-            "📊 Frames",
-            st.session_state.frame_count
-        )
-
-    # Stop button
+    # --- UI Placeholders (Initialized ONCE outside the loop) ---
+    timer_placeholder = st.empty()
+    
     col_stop1, col_stop2, col_stop3 = st.columns([1, 1, 1])
     with col_stop2:
-        if st.button(
-            "⏹️ STOP SCREENING",
-            type="primary",
-            use_container_width=True
-        ):
-            stop_screening()
-            return
+        # Checkbox is safer than a button inside a while loop in Streamlit
+        keep_running = st.checkbox("🟢 System Active (Uncheck to Stop)", value=True)
 
     st.markdown("---")
 
-    # Main content area
     if st.session_state.is_dual_mode:
         video_col, avatar_col = st.columns([3, 2])
     else:
         video_col, avatar_col = st.columns([3, 2])
 
-    # Placeholders for dynamic content
     with video_col:
         st.markdown("### 📹 Camera Feed")
-        video_placeholder = st.empty()
+        video_placeholder = st.empty()  # This will update smoothly
         face_metrics_placeholder = st.empty()
 
     with avatar_col:
@@ -431,76 +403,58 @@ def render_screening_page(session_duration: int):
         avatar_placeholder = st.empty()
         body_metrics_placeholder = st.empty()
 
-    # Evidence log
     st.markdown("### 📋 Live Evidence Log")
     evidence_placeholder = st.empty()
 
-    # ---- PROCESSING LOOP ----
+    # ---- SMOOTH PROCESSING LOOP ----
     camera = st.session_state.camera_system
     face_az = st.session_state.face_analyzer
     body_az = st.session_state.body_analyzer
     risk_eng = st.session_state.risk_engine
 
-    # Auto-stop if duration exceeded
-    if remaining <= 0:
-        stop_screening()
-        return
+    # Run continuous loop without st.rerun()
+    while keep_running:
+        elapsed = time.time() - st.session_state.session_start_time
+        remaining = max(0, session_duration - elapsed)
+        
+        # Update Timer UI
+        timer_placeholder.markdown(
+            f"**⏱️ Elapsed:** {int(elapsed)}s | **⏳ Remaining:** {int(remaining)}s | **📊 Frames:** {st.session_state.frame_count}"
+        )
 
-    # Get frames
-    face_frame_data, body_frame_data = camera.get_frames()
+        if remaining <= 0:
+            break
 
-    if face_frame_data.is_valid:
-        raw_face_frame = face_frame_data.frame
+        # Get frames
+        face_frame_data, body_frame_data = camera.get_frames()
 
-        # Analyze face
-        face_result = face_az.analyze_frame(raw_face_frame)
-        st.session_state.last_face_result = face_result
-        st.session_state.frame_count += 1
+        if face_frame_data.is_valid:
+            raw_face_frame = face_frame_data.frame
+            face_result = face_az.analyze_frame(raw_face_frame)
+            
+            st.session_state.last_face_result = face_result
+            st.session_state.frame_count += 1
 
-        # Process through risk engine
-        if face_result.face_detected:
-            risk_eng.process_face_result(
-                face_result, raw_face_frame
-            )
+            if face_result.face_detected:
+                risk_eng.process_face_result(face_result, raw_face_frame)
 
-        # Display face feed
-        with video_col:
+            # 1. Update Video (Every Frame - Smooth)
             if face_result.annotated_frame is not None:
-                display_frame = cv2.cvtColor(
-                    face_result.annotated_frame,
-                    cv2.COLOR_BGR2RGB
-                )
+                display_frame = cv2.cvtColor(face_result.annotated_frame, cv2.COLOR_BGR2RGB)
 
-                # If dual mode, create side-by-side
-                if (
-                    body_frame_data is not None
-                    and body_frame_data.is_valid
-                ):
-                    body_result = body_az.analyze_frame(
-                        body_frame_data.frame
-                    )
+                if st.session_state.is_dual_mode and body_frame_data and body_frame_data.is_valid:
+                    body_result = body_az.analyze_frame(body_frame_data.frame)
                     st.session_state.last_body_result = body_result
-
-                    risk_eng.process_body_result(
-                        body_result, body_frame_data.frame
-                    )
+                    risk_eng.process_body_result(body_result, body_frame_data.frame)
 
                     if body_result.annotated_frame is not None:
-                        combined = create_dual_view(
-                            face_result.annotated_frame,
-                            body_result.annotated_frame
-                        )
-                        display_frame = cv2.cvtColor(
-                            combined, cv2.COLOR_BGR2RGB
-                        )
+                        combined = create_dual_view(face_result.annotated_frame, body_result.annotated_frame)
+                        display_frame = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
 
-                video_placeholder.image(
-                    display_frame,
-                    channels="RGB",
-                    use_container_width=True
-                )
+                # Update the image in place (NO FLICKER)
+                video_placeholder.image(display_frame, channels="RGB", use_container_width=True)
 
-            # Face metrics
+            # 2. Update Text Metrics (Every Frame)
             face_metrics_placeholder.markdown(
                 f"""
                 | Metric | Value |
@@ -513,97 +467,31 @@ def render_screening_page(session_duration: int):
                 """
             )
 
-        # --- 3D Avatar ---
-        with avatar_col:
-            # Face 3D Avatar
-            if (
-                face_result.face_detected
-                and face_result.landmarks_3d is not None
-            ):
-                face_avatar_fig = create_face_avatar_3d(
-                    face_result.landmarks_3d,
-                    gaze_direction=face_result.gaze.gaze_direction,
-                    expression=face_result.emotion.expression_label
-                )
-                avatar_placeholder.plotly_chart(
-                    face_avatar_fig,
-                    use_container_width=True,
-                    key=f"face_avatar_{st.session_state.frame_count}"
-                )
+            # 3. Update 3D Avatar (Throttled to save CPU and prevent lag)
+            if st.session_state.frame_count % 10 == 0:
+                if face_result.face_detected and face_result.landmarks_3d is not None:
+                    face_avatar_fig = create_face_avatar_3d(
+                        face_result.landmarks_3d,
+                        gaze_direction=face_result.gaze.gaze_direction,
+                        expression=face_result.emotion.expression_label
+                    )
+                    avatar_placeholder.plotly_chart(face_avatar_fig, use_container_width=True)
 
-            # Body 3D Avatar (if dual mode)
-            if (
-                st.session_state.is_dual_mode
-                and st.session_state.last_body_result is not None
-                and st.session_state.last_body_result.pose_detected
-                and st.session_state.last_body_result.landmarks_3d
-                is not None
-            ):
-                body_result = st.session_state.last_body_result
-                movement_flags = {
-                    'is_rocking': body_result.is_rocking,
-                    'is_hand_flapping': body_result.is_hand_flapping,
-                }
-                body_avatar_fig = create_pose_avatar_3d(
-                    body_result.landmarks_3d,
-                    title="3D Body Avatar",
-                    movement_flags=movement_flags
-                )
-                body_metrics_placeholder.plotly_chart(
-                    body_avatar_fig,
-                    use_container_width=True,
-                    key=f"body_avatar_{st.session_state.frame_count}"
-                )
+            # 4. Update Evidence Log
+            if st.session_state.frame_count % 5 == 0:
+                current_evidence = risk_eng.evidence
+                if current_evidence:
+                    evidence_md = "| Time | Category | Description | Severity |\n|------|----------|-------------|----------|\n"
+                    for ev in current_evidence[-3:]:  # Show last 3 to save space
+                        sev_emoji = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}.get(ev.severity, '⚪')
+                        short_desc = ev.description[:60] + "..." if len(ev.description) > 60 else ev.description
+                        evidence_md += f"| {ev.session_time_str} | {ev.category.upper()} | {short_desc} | {sev_emoji} {ev.severity.upper()} |\n"
+                    evidence_placeholder.markdown(evidence_md)
 
-                # Body metrics display
-                st.markdown(
-                    f"""
-                    | Motor Metric | Status |
-                    |-------------|--------|
-                    | 🔄 Rocking | {'⚠️ DETECTED' if body_result.is_rocking else '✅ None'} |
-                    | 👋 Flapping | {'⚠️ DETECTED' if body_result.is_hand_flapping else '✅ None'} |
-                    | 📊 Repetitive Score | {body_result.repetitive_motion_score:.2f} |
-                    | 🧘 Stillness | {body_result.stillness_score:.2f} |
-                    """
-                )
+        time.sleep(0.03) # Let CPU breathe
 
-        # --- Live Evidence Log ---
-        current_evidence = risk_eng.evidence
-        if current_evidence:
-            evidence_md = "| Time | Category | Description | Severity |\n"
-            evidence_md += "|------|----------|-------------|----------|\n"
-
-            for ev in current_evidence[-5:]:  # Show last 5
-                sev_emoji = {
-                    'high': '🔴',
-                    'medium': '🟡',
-                    'low': '🟢'
-                }.get(ev.severity, '⚪')
-
-                # Truncate description for table
-                short_desc = (
-                    ev.description[:80] + "..."
-                    if len(ev.description) > 80
-                    else ev.description
-                )
-
-                evidence_md += (
-                    f"| {ev.session_time_str} "
-                    f"| {ev.category.upper()} "
-                    f"| {short_desc} "
-                    f"| {sev_emoji} {ev.severity.upper()} |\n"
-                )
-
-            evidence_placeholder.markdown(evidence_md)
-        else:
-            evidence_placeholder.info(
-                "No behavioral markers flagged yet. "
-                "Monitoring in progress..."
-            )
-
-    # Auto-refresh for continuous streaming
-    time.sleep(0.05)  # ~20 FPS target
-    st.rerun()
+    # When loop exits (time up or unchecked)
+    stop_screening()
 
 
 def stop_screening():

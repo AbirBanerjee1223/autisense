@@ -568,30 +568,30 @@ class ReportGenerator:
 
         methodology_text = """
 Computer Vision Pipeline:
-• Face Detection & Landmark Extraction: MediaPipe Face Mesh (468 3D landmarks with iris refinement)
-• Pose Estimation: MediaPipe Pose (33 body landmarks with 3D coordinates)
-• Eye Aspect Ratio (EAR): Soukupova & Cech (2016) method for blink detection
-• Gaze Direction: Iris-to-eye-corner ratio analysis with head pose compensation
-• Head Pose: Perspective-n-Point (PnP) solver with generic 3D face model
+- Face Detection & Landmark Extraction: MediaPipe Face Mesh (468 3D landmarks with iris refinement)
+- Pose Estimation: MediaPipe Pose (33 body landmarks with 3D coordinates)
+- Eye Aspect Ratio (EAR): Soukupova & Cech (2016) method for blink detection
+- Gaze Direction: Iris-to-eye-corner ratio analysis with head pose compensation
+- Head Pose: Perspective-n-Point (PnP) solver with generic 3D face model
 
 Behavioral Analysis Algorithms:
-• Gaze Avoidance: Continuous tracking of eye contact with >3-second flagging threshold
-• Flat Affect: Rolling variance of composite expression intensity score (mouth + brow + smile)
-• Body Rocking: Zero-crossing rate analysis of detrended torso vertical oscillation signal
-• Hand Flapping: Wrist velocity magnitude combined with direction-reversal frequency
-• Repetitive Motion: Autocorrelation analysis of shoulder center trajectory
+- Gaze Avoidance: Continuous tracking of eye contact with >3-second flagging threshold
+- Flat Affect: Rolling variance of composite expression intensity score (mouth + brow + smile)
+- Body Rocking: Zero-crossing rate analysis of detrended torso vertical oscillation signal
+- Hand Flapping: Wrist velocity magnitude combined with direction-reversal frequency
+- Repetitive Motion: Autocorrelation analysis of shoulder center trajectory
 
 Risk Scoring:
-• Domain-weighted scoring: Social Attention (40%), Facial Expression (25%), Motor Behavior (25%), Physiological (10%)
-• Thresholds derived from developmental psychology literature
-• Explainable AI approach: Every flag includes specific metric, threshold, and visual evidence
+- Domain-weighted scoring: Social Attention (40%), Facial Expression (25%), Motor Behavior (25%), Physiological (10%)
+- Thresholds derived from developmental psychology literature
+- Explainable AI approach: Every flag includes specific metric, threshold, and visual evidence
 
 Limitations:
-• Single-session analysis (no longitudinal tracking)
-• Lighting and camera quality affect detection accuracy
-• Not validated against clinical gold-standard instruments (ADOS-2, ADI-R)
-• Cultural and individual variations in baseline behavior not accounted for
-• This tool is intended for screening support only, not diagnosis
+- Single-session analysis (no longitudinal tracking)
+- Lighting and camera quality affect detection accuracy
+- Not validated against clinical gold-standard instruments (ADOS-2, ADI-R)
+- Cultural and individual variations in baseline behavior not accounted for
+- This tool is intended for screening support only, not diagnosis
 """
         pdf.multi_cell(0, 4.5, methodology_text.strip())
 

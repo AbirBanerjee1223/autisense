@@ -1,29 +1,22 @@
-# main.py
+# main.py (COMPLETE REWRITE)
 
 import streamlit as st
 import cv2
 import numpy as np
 import time
-import json
+import base64
 from pathlib import Path
 
 from config import (
     LAPTOP_CAM_INDEX,
-    PHONE_CAM_URL,
     SESSION_DURATION_SECONDS,
-    EVIDENCE_DIR
-)
-from modules.dual_camera import (
-    DualCameraSystem,
-    CameraFrame,
-    create_dual_view
+    EVIDENCE_DIR,
+    NAME_CALL_AUDIO,
+    BASELINES
 )
 from modules.face_analyzer import FaceAnalyzer
 from modules.body_analyzer import BodyAnalyzer
-from modules.avatar_3d import (
-    create_pose_avatar_3d,
-    create_face_avatar_3d
-)
+from modules.stimulus_engine import StimulusEngine, StimulusPhase
 from modules.risk_engine import RiskEngine
 from modules.report_generator import ReportGenerator
 from modules.chatbot import AutismScreeningChatbot
@@ -45,583 +38,554 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
+        font-size: 2.5rem; font-weight: 700;
         background: linear-gradient(90deg, #2980b9, #8e44ad);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-align: center;
-        padding: 10px 0;
+        text-align: center; padding: 10px 0;
     }
-    .sub-header {
-        text-align: center;
-        color: #7f8c8d;
-        font-size: 1.1rem;
-        margin-bottom: 20px;
+    .phase-banner {
+        padding: 8px 16px; border-radius: 8px;
+        font-weight: bold; text-align: center;
+        margin-bottom: 10px;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #1a1a2e, #16213e);
-        border-radius: 12px;
-        padding: 15px;
-        border-left: 4px solid #2980b9;
-        margin: 5px 0;
+    .phase-baseline { background: #ecf0f1; color: #2c3e50; }
+    .phase-social { background: #3498db; color: white; }
+    .phase-namecall { background: #e67e22; color: white; }
+    .phase-smile { background: #e91e63; color: white; }
+    .phase-cooldown { background: #95a5a6; color: white; }
+    .deviation-typical { 
+        background: #d5f5e3; border-left: 4px solid #2ecc71;
+        padding: 10px; margin: 5px 0; border-radius: 4px;
     }
-    .risk-high {
-        background: linear-gradient(135deg, #641E16, #922B21);
-        border-left: 4px solid #E74C3C;
-        color: white;
-        padding: 15px;
-        border-radius: 12px;
+    .deviation-borderline {
+        background: #fef9e7; border-left: 4px solid #f1c40f;
+        padding: 10px; margin: 5px 0; border-radius: 4px;
     }
-    .risk-moderate {
-        background: linear-gradient(135deg, #7D6608, #9A7D0A);
-        border-left: 4px solid #F1C40F;
-        color: white;
-        padding: 15px;
-        border-radius: 12px;
-    }
-    .risk-low {
-        background: linear-gradient(135deg, #0E6251, #148F77);
-        border-left: 4px solid #2ECC71;
-        color: white;
-        padding: 15px;
-        border-radius: 12px;
-    }
-    .evidence-tag-high {
-        background-color: #E74C3C;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-    }
-    .evidence-tag-medium {
-        background-color: #F1C40F;
-        color: black;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-    }
-    .stChatMessage {
-        background-color: #1a1a2e;
+    .deviation-atypical {
+        background: #fdedec; border-left: 4px solid #e74c3c;
+        padding: 10px; margin: 5px 0; border-radius: 4px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # =============================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE
 # =============================================
-def init_session_state():
-    """Initialize all session state variables."""
+def init_state():
     defaults = {
-        'app_state': 'setup',      # setup, screening, results
-        'camera_system': None,
+        'app_state': 'setup',
         'face_analyzer': None,
-        'body_analyzer': None,
+        'stimulus_engine': None,
         'risk_engine': None,
         'chatbot': None,
-        'session_start_time': None,
-        'is_dual_mode': False,
-        'phone_url': '',
-        'subject_id': 'Anonymous',
+        'session_start': None,
         'face_stats': {},
-        'body_stats': {},
         'assessment': None,
         'report_path': None,
         'chat_messages': [],
         'frame_count': 0,
-        'last_face_result': None,
-        'last_body_result': None,
-        'screening_active': False,
+        'subject_id': 'Anonymous',
     }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-
-init_session_state()
+init_state()
 
 
 # =============================================
-# SIDEBAR - CONFIGURATION
+# AUDIO HELPER
+# =============================================
+def get_audio_html(audio_path: str) -> str:
+    """Create auto-playing audio HTML from a wav file."""
+    if not Path(audio_path).exists():
+        return ""
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+    b64 = base64.b64encode(audio_bytes).decode()
+    return f"""
+    <audio autoplay>
+        <source src="data:audio/wav;base64,{b64}" type="audio/wav">
+    </audio>
+    """
+
+
+# =============================================
+# SIDEBAR
 # =============================================
 def render_sidebar():
-    """Render the sidebar configuration panel."""
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
 
-        # Subject Info
-        st.markdown("### 👤 Subject")
         st.session_state.subject_id = st.text_input(
-            "Subject ID (optional)",
-            value=st.session_state.subject_id,
-            placeholder="e.g., CHILD-001"
+            "Subject ID", value=st.session_state.subject_id
         )
 
         st.markdown("---")
-
-        # Camera Config
-        st.markdown("### 📷 Camera Setup")
-
-        use_dual = st.checkbox(
-            "Enable Dual Camera (Phone + Laptop)",
-            value=st.session_state.is_dual_mode,
-            help="Use IP Webcam app on your phone as a body camera"
-        )
-
-        if use_dual:
-            st.session_state.phone_url = st.text_input(
-                "Phone Camera URL",
-                value=st.session_state.phone_url or PHONE_CAM_URL,
-                placeholder="http://192.168.x.x:8080/video",
-                help=(
-                    "Install 'IP Webcam' app on Android, "
-                    "start server, and enter the URL here"
-                )
-            )
-            st.info(
-                "📱 **Setup:** Install 'IP Webcam' on Android → "
-                "Start Server → Enter the IP address shown"
-            )
-
-        st.session_state.is_dual_mode = use_dual
+        st.markdown("### Protocol Phases")
+        st.markdown("""
+        1. **Baseline** (0-15s) - Natural behavior
+        2. **Social/Geometric** (15-45s) - Visual preference
+        3. **Name-Call** (45-55s) - Audio response
+        4. **Smile Prompt** (55-75s) - Reciprocity
+        5. **Cooldown** (75-90s) - Post-stimulus
+        """)
 
         st.markdown("---")
-
-        # Session Settings
-        st.markdown("### ⏱️ Session")
-        session_duration = st.slider(
-            "Duration (seconds)",
-            min_value=30,
-            max_value=300,
-            value=SESSION_DURATION_SECONDS,
-            step=15
-        )
-
-        st.markdown("---")
-
-        # System Status
-        st.markdown("### 📊 Status")
         state = st.session_state.app_state
         if state == 'setup':
-            st.info("🔧 Ready to configure")
+            st.info("🔧 Ready")
         elif state == 'screening':
-            st.success("🔴 Screening in progress")
-            st.metric(
-                "Frames",
-                st.session_state.frame_count
-            )
+            st.success("🔴 Screening active")
         elif state == 'results':
-            st.success("✅ Results available")
+            st.success("✅ Results ready")
 
-        # Reset button
-        if st.button("🔄 Reset Everything", use_container_width=True):
+        if st.button("🔄 Reset", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            # Clear evidence
             for f in EVIDENCE_DIR.glob("evidence_*.jpg"):
                 f.unlink()
             st.rerun()
-
-        return session_duration
 
 
 # =============================================
 # SETUP PAGE
 # =============================================
-def render_setup_page():
-    """Render the initial setup and start page."""
+def render_setup():
     st.markdown(
         '<h1 class="main-header">🧠 NeuroLens AI</h1>',
         unsafe_allow_html=True
     )
     st.markdown(
-        '<p class="sub-header">'
-        'AI-Powered Autism Spectrum Behavioral Screening Tool'
-        '</p>',
+        "<p style='text-align:center; color:#7f8c8d;'>"
+        "Structured Clinical Stimulus Behavioral Screening"
+        "</p>",
         unsafe_allow_html=True
     )
 
-    # Feature cards
     col1, col2, col3 = st.columns(3)
-
     with col1:
-        st.markdown("### 👁️ Gaze & Expression")
+        st.markdown("### 👁️ Social Preference")
         st.markdown(
-            "Real-time eye contact tracking, blink rate "
-            "analysis, facial expression variance detection, "
-            "and head pose estimation using 468 3D facial "
-            "landmarks."
+            "Split-screen test measures visual preference "
+            "for social vs. geometric stimuli "
+            "(EarliPoint method)."
         )
-
     with col2:
-        st.markdown("### 🏃 Body Movement")
+        st.markdown("### 🔊 Name-Call Latency")
         st.markdown(
-            "Dual-camera body analysis detects repetitive "
-            "behaviors including body rocking, hand flapping, "
-            "and unusual stillness using 33-point pose "
-            "estimation."
+            "Audio stimulus measures orienting response "
+            "time in milliseconds "
+            "(SenseToKnow method)."
         )
-
     with col3:
-        st.markdown("### 📄 Evidence Reports")
+        st.markdown("### 😊 Emotional Reciprocity")
         st.markdown(
-            "Generate clinical-grade PDF reports with "
-            "timestamped visual evidence, explainable AI "
-            "risk scores, and actionable recommendations."
+            "Smile prompt measures social mirroring "
+            "and affect synchrony."
         )
 
     st.markdown("---")
 
-    # Quick start
-    st.markdown("## 🚀 Start Screening Session")
+    # Check stimuli exist
+    from config import SOCIAL_GEOMETRIC_VIDEO, SMILE_PROMPT_VIDEO
+    stimuli_ready = (
+        Path(SOCIAL_GEOMETRIC_VIDEO).exists() and
+        Path(SMILE_PROMPT_VIDEO).exists() and
+        Path(NAME_CALL_AUDIO).exists()
+    )
 
-    col_start1, col_start2 = st.columns([2, 1])
-
-    with col_start1:
-        st.markdown(
-            """
-            **Pre-Screening Checklist:**
-            - ✅ Good lighting on the subject's face
-            - ✅ Webcam positioned at eye level
-            - ✅ Subject seated ~2 feet from camera
-            - ✅ Minimal background movement
-            """
+    if not stimuli_ready:
+        st.warning(
+            "⚠️ Stimulus files not found. "
+            "Run `python stimulus_creator.py` first."
         )
-        if st.session_state.is_dual_mode:
-            st.markdown(
-                """
-                **Dual Camera Setup:**
-                - ✅ Phone running IP Webcam app
-                - ✅ Phone positioned to capture full body (side view)
-                - ✅ Both devices on same WiFi network
-                """
-            )
+        if st.button("Generate Stimuli Now"):
+            with st.spinner("Generating stimulus files..."):
+                from stimulus_creator import create_all_stimuli
+                create_all_stimuli()
+            st.success("✅ Stimuli generated!")
+            st.rerun()
+        return
 
-    with col_start2:
-        st.markdown("")
-        st.markdown("")
-        if st.button(
-            "▶️ START SCREENING",
-            type="primary",
-            use_container_width=True
-        ):
-            start_screening_session()
+    st.success("✅ All stimulus files ready")
+
+    if st.button(
+        "▶️ START SCREENING PROTOCOL",
+        type="primary",
+        use_container_width=True
+    ):
+        start_session()
 
 
-def start_screening_session():
-    """Initialize all components and start screening."""
-    with st.spinner("Initializing cameras and AI models..."):
-        # Initialize camera system
-        phone_url = (
-            st.session_state.phone_url
-            if st.session_state.is_dual_mode
-            else None
-        )
-        camera_system = DualCameraSystem(
-            laptop_source=LAPTOP_CAM_INDEX,
-            phone_url=phone_url
-        )
-        status = camera_system.start()
-
-        if not status['face_cam']:
-            st.error(
-                "❌ Failed to open laptop camera. "
-                "Check permissions."
-            )
-            return
-
-        if (
-            st.session_state.is_dual_mode
-            and not status['body_cam']
-        ):
-            st.warning(
-                "⚠️ Phone camera not connected. "
-                "Running in single-camera mode."
-            )
-            st.session_state.is_dual_mode = False
-
-        # Initialize analyzers
+def start_session():
+    """Initialize everything and begin."""
+    with st.spinner("Initializing..."):
         face_analyzer = FaceAnalyzer()
-        body_analyzer = (
-            BodyAnalyzer()
-            if st.session_state.is_dual_mode
-            else None
-        )
-
-        # Initialize risk engine
+        stimulus_engine = StimulusEngine()
         start_time = time.time()
         risk_engine = RiskEngine(start_time)
-
-        # Initialize chatbot
         chatbot = AutismScreeningChatbot()
 
-        # Store in session state
-        st.session_state.camera_system = camera_system
+        stimulus_engine.start_session()
+
         st.session_state.face_analyzer = face_analyzer
-        st.session_state.body_analyzer = body_analyzer
+        st.session_state.stimulus_engine = stimulus_engine
         st.session_state.risk_engine = risk_engine
         st.session_state.chatbot = chatbot
-        st.session_state.session_start_time = start_time
+        st.session_state.session_start = start_time
         st.session_state.app_state = 'screening'
-        st.session_state.screening_active = True
         st.session_state.frame_count = 0
 
     st.rerun()
 
 
 # =============================================
-# SCREENING PAGE
+# SCREENING PAGE (NO FLICKERING)
 # =============================================
-# Replace this function in main.py
-def render_screening_page(session_duration: int):
-    """Render the live screening interface with smooth video rendering."""
-    st.markdown('<h2 style="text-align:center;">🔴 Live Screening</h2>', unsafe_allow_html=True)
+def render_screening():
+    st.markdown(
+        "<h2 style='text-align:center;'>🔴 Live Screening</h2>",
+        unsafe_allow_html=True
+    )
 
-    # --- UI Placeholders (Initialized ONCE outside the loop) ---
-    timer_placeholder = st.empty()
-    
-    col_stop1, col_stop2, col_stop3 = st.columns([1, 1, 1])
-    with col_stop2:
-        # Checkbox is safer than a button inside a while loop in Streamlit
-        keep_running = st.checkbox("🟢 System Active (Uncheck to Stop)", value=True)
+    face_az = st.session_state.face_analyzer
+    stim = st.session_state.stimulus_engine
+    risk_eng = st.session_state.risk_engine
+
+    # Layout
+    timer_col1, timer_col2, timer_col3 = st.columns(3)
+    stop_col1, stop_col2, stop_col3 = st.columns([1, 1, 1])
+
+    with stop_col2:
+        stop_button = st.button(
+            "⏹️ STOP SCREENING",
+            type="primary",
+            use_container_width=True
+        )
+
+    if stop_button:
+        stop_session()
+        return
 
     st.markdown("---")
 
-    if st.session_state.is_dual_mode:
-        video_col, avatar_col = st.columns([3, 2])
-    else:
-        video_col, avatar_col = st.columns([3, 2])
+    # Phase banner placeholder
+    phase_placeholder = st.empty()
 
-    with video_col:
-        st.markdown("### 📹 Camera Feed")
-        video_placeholder = st.empty()  # This will update smoothly
-        face_metrics_placeholder = st.empty()
+    # Two columns: Camera | Stimulus
+    cam_col, stim_col = st.columns(2)
 
-    with avatar_col:
-        st.markdown("### 🧍 3D Digital Twin")
-        avatar_placeholder = st.empty()
-        body_metrics_placeholder = st.empty()
+    with cam_col:
+        st.markdown("### 📹 Subject Camera")
+        video_placeholder = st.empty()
+        metrics_placeholder = st.empty()
 
-    st.markdown("### 📋 Live Evidence Log")
+    with stim_col:
+        st.markdown("### 🖥️ Stimulus Display")
+        stimulus_placeholder = st.empty()
+        stim_info_placeholder = st.empty()
+
+    # Audio placeholder (hidden)
+    audio_placeholder = st.empty()
+
+    # Evidence log
+    st.markdown("### 📋 Live Evidence")
     evidence_placeholder = st.empty()
 
-    # ---- SMOOTH PROCESSING LOOP ----
-    camera = st.session_state.camera_system
-    face_az = st.session_state.face_analyzer
-    body_az = st.session_state.body_analyzer
-    risk_eng = st.session_state.risk_engine
+    # Progress
+    progress_placeholder = st.empty()
 
-    # Run continuous loop without st.rerun()
+    # ---- MAIN LOOP (no st.rerun!) ----
+    cap = cv2.VideoCapture(LAPTOP_CAM_INDEX)
+    if not cap.isOpened():
+        st.error("❌ Cannot open camera")
+        return
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    keep_running = True
+
     while keep_running:
-        elapsed = time.time() - st.session_state.session_start_time
-        remaining = max(0, session_duration - elapsed)
-        
-        # Update Timer UI
-        timer_placeholder.markdown(
-            f"**⏱️ Elapsed:** {int(elapsed)}s | **⏳ Remaining:** {int(remaining)}s | **📊 Frames:** {st.session_state.frame_count}"
+        elapsed = time.time() - st.session_state.session_start
+
+        # Check session duration
+        if elapsed >= SESSION_DURATION_SECONDS:
+            cap.release()
+            stop_session()
+            return
+
+        # Read camera frame
+        ret, frame = cap.read()
+        if not ret:
+            time.sleep(0.01)
+            continue
+
+        # Analyze face
+        face_result = face_az.analyze_frame(frame)
+        st.session_state.frame_count += 1
+
+        # Process through risk engine
+        if face_result.face_detected:
+            risk_eng.process_face_result(face_result, frame)
+
+        # Get stimulus data
+        gaze_dir = (
+            face_result.gaze.gaze_direction
+            if face_result.face_detected else "unknown"
+        )
+        is_looking = (
+            face_result.gaze.is_looking_at_camera
+            if face_result.face_detected else False
+        )
+        head_yaw = (
+            face_result.gaze.head_pose_yaw
+            if face_result.face_detected else 0.0
+        )
+        smile_score = (
+            face_result.emotion.smile_score
+            if face_result.face_detected else 0.0
         )
 
-        if remaining <= 0:
-            break
+        stim_result = stim.update(
+            gaze_direction=gaze_dir,
+            is_looking=is_looking,
+            head_yaw=head_yaw,
+            smile_score=smile_score,
+        )
 
-        # Get frames
-        face_frame_data, body_frame_data = camera.get_frames()
+        # ---- UPDATE UI (in-place, no rerun) ----
 
-        if face_frame_data.is_valid:
-            raw_face_frame = face_frame_data.frame
-            face_result = face_az.analyze_frame(raw_face_frame)
-            
-            st.session_state.last_face_result = face_result
-            st.session_state.frame_count += 1
-
-            if face_result.face_detected:
-                risk_eng.process_face_result(face_result, raw_face_frame)
-
-            # 1. Update Video (Every Frame - Smooth)
-            if face_result.annotated_frame is not None:
-                display_frame = cv2.cvtColor(face_result.annotated_frame, cv2.COLOR_BGR2RGB)
-
-                if st.session_state.is_dual_mode and body_frame_data and body_frame_data.is_valid:
-                    body_result = body_az.analyze_frame(body_frame_data.frame)
-                    st.session_state.last_body_result = body_result
-                    risk_eng.process_body_result(body_result, body_frame_data.frame)
-
-                    if body_result.annotated_frame is not None:
-                        combined = create_dual_view(face_result.annotated_frame, body_result.annotated_frame)
-                        display_frame = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
-
-                # Update the image in place (NO FLICKER)
-                video_placeholder.image(display_frame, channels="RGB", use_container_width=True)
-
-            # 2. Update Text Metrics (Every Frame)
-            face_metrics_placeholder.markdown(
-                f"""
-                | Metric | Value |
-                |--------|-------|
-                | 👁️ Eye Contact | {'✅ Yes' if face_result.gaze.is_looking_at_camera else '❌ No'} |
-                | 🔍 Gaze Direction | {face_result.gaze.gaze_direction} |
-                | 😐 Expression | {face_result.emotion.expression_label} |
-                | 💧 Blinks | {face_az.blink_total} |
-                | 🔄 Head Yaw | {face_result.gaze.head_pose_yaw:.1f}° |
-                """
+        # Timer
+        remaining = max(0, SESSION_DURATION_SECONDS - elapsed)
+        with timer_col1:
+            timer_col1.metric("⏱️ Elapsed", f"{int(elapsed)}s")
+        with timer_col2:
+            timer_col2.metric("⏳ Remaining", f"{int(remaining)}s")
+        with timer_col3:
+            timer_col3.metric(
+                "📊 Phase",
+                stim_result["phase"].replace("_", " ").title()
             )
 
-            # 3. Update 3D Avatar (Throttled to save CPU and prevent lag)
-            if st.session_state.frame_count % 10 == 0:
-                if face_result.face_detected and face_result.landmarks_3d is not None:
-                    face_avatar_fig = create_face_avatar_3d(
-                        face_result.landmarks_3d,
-                        gaze_direction=face_result.gaze.gaze_direction,
-                        expression=face_result.emotion.expression_label
-                    )
-                    avatar_placeholder.plotly_chart(face_avatar_fig, use_container_width=True)
+        # Phase banner
+        phase = stim_result["phase"]
+        phase_classes = {
+            "baseline": "phase-baseline",
+            "social_geo": "phase-social",
+            "name_call": "phase-namecall",
+            "smile_prompt": "phase-smile",
+            "cooldown": "phase-cooldown",
+        }
+        css_class = phase_classes.get(phase, "phase-baseline")
+        phase_placeholder.markdown(
+            f'<div class="phase-banner {css_class}">'
+            f'{stim_result["instruction"]}</div>',
+            unsafe_allow_html=True
+        )
 
-            # 4. Update Evidence Log
-            if st.session_state.frame_count % 5 == 0:
-                current_evidence = risk_eng.evidence
-                if current_evidence:
-                    evidence_md = "| Time | Category | Description | Severity |\n|------|----------|-------------|----------|\n"
-                    for ev in current_evidence[-3:]:  # Show last 3 to save space
-                        sev_emoji = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}.get(ev.severity, '⚪')
-                        short_desc = ev.description[:60] + "..." if len(ev.description) > 60 else ev.description
-                        evidence_md += f"| {ev.session_time_str} | {ev.category.upper()} | {short_desc} | {sev_emoji} {ev.severity.upper()} |\n"
-                    evidence_placeholder.markdown(evidence_md)
+        # Camera feed
+        if face_result.annotated_frame is not None:
+            display = cv2.cvtColor(
+                face_result.annotated_frame, cv2.COLOR_BGR2RGB
+            )
+            video_placeholder.image(
+                display, channels="RGB",
+                use_container_width=True
+            )
 
-        time.sleep(0.03) # Let CPU breathe
+        # Face metrics
+        if face_result.face_detected:
+            contact = (
+                "✅ Yes"
+                if face_result.gaze.is_looking_at_camera
+                else "❌ No"
+            )
+            metrics_placeholder.markdown(
+                f"**Eye Contact:** {contact} | "
+                f"**Gaze:** {face_result.gaze.gaze_direction} | "
+                f"**Expr:** {face_result.emotion.expression_label} | "
+                f"**Blinks:** {face_az.blink_total} | "
+                f"**Smile:** {face_result.emotion.smile_score:.2f}"
+            )
 
-    # When loop exits (time up or unchecked)
-    stop_screening()
+        # Stimulus display
+        stim_frame = stim_result.get("stimulus_frame")
+        if stim_frame is not None:
+            stim_rgb = cv2.cvtColor(stim_frame, cv2.COLOR_BGR2RGB)
+            stimulus_placeholder.image(
+                stim_rgb, channels="RGB",
+                use_container_width=True
+            )
+
+        # Stimulus metrics
+        if phase == "social_geo":
+            sg = stim.social_geo_metrics
+            stim_info_placeholder.markdown(
+                f"**Social:** {sg.social_preference_pct:.0f}% | "
+                f"**Geometric:** {sg.geometric_preference_pct:.0f}% | "
+                f"**Away:** {sg.gaze_away_frames} frames"
+            )
+        elif phase == "name_call":
+            nc = stim.name_call_metrics
+            if nc.responded:
+                stim_info_placeholder.success(
+                    f"✅ Response detected! "
+                    f"Latency: {nc.response_latency_ms:.0f}ms"
+                )
+            else:
+                stim_info_placeholder.info(
+                    "⏳ Waiting for head-turn response..."
+                )
+        elif phase == "smile_prompt":
+            rc = stim.reciprocity_tracker.get_live_metrics()
+            stim_info_placeholder.markdown(
+                f"**Smile-back:** "
+                f"{rc['smile_reciprocity_pct']:.0f}% | "
+                f"**Peak:** {rc['peak_intensity']:.2f} | "
+                f"**Episodes:** {rc['smile_episodes']} | "
+                f"**Mirroring:** {rc['mirroring_events']} events"
+            )
+            if rc['is_currently_smiling']:
+                stim_info_placeholder.markdown(
+                    f"😊 **SMILING NOW** "
+                    f"(duration: {rc['current_smile_duration_ms']:.0f}ms)"
+                )
+
+        # Audio trigger
+        if stim_result.get("play_audio"):
+            audio_html = get_audio_html(NAME_CALL_AUDIO)
+            if audio_html:
+                audio_placeholder.markdown(
+                    audio_html, unsafe_allow_html=True
+                )
+
+        # Evidence log
+        if risk_eng.evidence:
+            ev_lines = []
+            for ev in risk_eng.evidence[-3:]:
+                sev_icon = {
+                    'high': '🔴', 'medium': '🟡', 'low': '🟢'
+                }.get(ev.severity, '⚪')
+                ev_lines.append(
+                    f"{sev_icon} **[{ev.session_time_str}]** "
+                    f"{ev.category}: "
+                    f"{ev.description[:80]}..."
+                )
+            evidence_placeholder.markdown("\n\n".join(ev_lines))
+
+        # Progress bar
+        progress_placeholder.progress(
+            min(elapsed / SESSION_DURATION_SECONDS, 1.0),
+            text=f"Session: {elapsed:.0f}/{SESSION_DURATION_SECONDS}s"
+        )
+
+        # Frame rate control
+        time.sleep(0.05)
+
+    cap.release()
 
 
-def stop_screening():
-    """Stop the screening session and compute results."""
-    with st.spinner("Computing risk assessment..."):
-        # Stop cameras
-        if st.session_state.camera_system is not None:
-            st.session_state.camera_system.stop()
-
-        # Get final stats
+def stop_session():
+    """Compute results and transition to results page."""
+    with st.spinner("Computing clinical assessment..."):
         face_stats = {}
-        body_stats = None
-
-        if st.session_state.face_analyzer is not None:
-            face_stats = (
-                st.session_state.face_analyzer.get_session_stats()
-            )
+        if st.session_state.face_analyzer:
+            face_stats = st.session_state.face_analyzer.get_session_stats()
             st.session_state.face_stats = face_stats
 
-        if st.session_state.body_analyzer is not None:
-            body_stats = (
-                st.session_state.body_analyzer.get_session_stats()
+        stimulus_metrics = None
+        if st.session_state.stimulus_engine:
+            stimulus_metrics = (
+                st.session_state.stimulus_engine.get_all_metrics()
             )
-            st.session_state.body_stats = body_stats
+            st.session_state.stimulus_engine.cleanup()
 
-        # Compute risk assessment
-        if st.session_state.risk_engine is not None:
+        if st.session_state.risk_engine:
             assessment = st.session_state.risk_engine.compute_assessment(
                 face_stats=face_stats,
-                body_stats=body_stats
+                stimulus_metrics=stimulus_metrics,
             )
             st.session_state.assessment = assessment
 
-            # Generate PDF Report
-            report_gen = ReportGenerator()
+            # Generate report
+            gen = ReportGenerator()
             session_info = {
                 'session_id': f"SCR-{int(time.time())}",
                 'duration': face_stats.get(
                     'session_duration_seconds', 0
                 ),
-                'camera_mode': (
-                    'Dual (Face + Body)'
-                    if st.session_state.is_dual_mode
-                    else 'Single (Face)'
-                ),
+                'camera_mode': 'Single (Face + Stimulus Protocol)',
                 'subject_id': st.session_state.subject_id,
             }
-
-            report_path = report_gen.generate_report(
+            report_path = gen.generate_report(
                 assessment=assessment,
                 session_info=session_info,
                 face_stats=face_stats,
-                body_stats=body_stats
             )
             st.session_state.report_path = report_path
 
             # Inject context into chatbot
-            if st.session_state.chatbot is not None:
+            if st.session_state.chatbot:
                 st.session_state.chatbot.inject_session_context(
                     assessment_summary=assessment.summary,
                     domain_scores=assessment.domain_scores,
                     evidence_count=len(assessment.evidence_items)
                 )
 
-        st.session_state.app_state = 'results'
-        st.session_state.screening_active = False
+        if st.session_state.face_analyzer:
+            st.session_state.face_analyzer.close()
 
+        st.session_state.app_state = 'results'
     st.rerun()
 
 
 # =============================================
 # RESULTS PAGE
 # =============================================
-def render_results_page():
-    """Render the post-screening results dashboard."""
+def render_results():
     st.markdown(
-        '<h1 class="main-header">📊 Screening Results</h1>',
+        '<h1 class="main-header">📊 Clinical Results</h1>',
         unsafe_allow_html=True
     )
 
     assessment = st.session_state.assessment
-    face_stats = st.session_state.face_stats
-    body_stats = st.session_state.body_stats
-
-    if assessment is None:
-        st.error("No assessment data available.")
+    if not assessment:
+        st.error("No assessment data.")
         return
 
-    # ---- OVERALL RISK BANNER ----
-    risk_class = {
-        'Low': 'risk-low',
-        'Moderate': 'risk-moderate',
-        'High': 'risk-high',
-        'Very High': 'risk-high'
-    }.get(assessment.risk_level, 'risk-low')
-
-    risk_emoji = {
-        'Low': '🟢',
-        'Moderate': '🟡',
-        'High': '🔴',
-        'Very High': '🔴'
-    }.get(assessment.risk_level, '⚪')
-
+    # Risk level banner
+    level_styles = {
+        'Typical': ('deviation-typical', '🟢'),
+        'Borderline': ('deviation-borderline', '🟡'),
+        'Elevated': ('deviation-atypical', '🟠'),
+        'High': ('deviation-atypical', '🔴'),
+    }
+    css, emoji = level_styles.get(
+        assessment.risk_level, ('deviation-typical', '⚪')
+    )
     st.markdown(
-        f"""
-        <div class="{risk_class}">
-            <h2 style="text-align:center; margin:0;">
-                {risk_emoji} Overall Risk: {assessment.risk_level}
-            </h2>
-            <h3 style="text-align:center; margin:5px 0 0 0;">
-                Score: {assessment.overall_risk_score}/100
-            </h3>
-        </div>
-        """,
+        f'<div class="{css}" style="text-align:center; font-size:1.3em;">'
+        f'{emoji} Overall: <b>{assessment.risk_level}</b></div>',
         unsafe_allow_html=True
     )
     st.markdown("")
 
-    # ---- TABS FOR DIFFERENT VIEWS ----
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard",
-        "🔍 Evidence Timeline",
-        "📄 Download Report",
-        "🧍 3D Review",
+    # Tabs
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Deviations",
+        "🔍 Evidence",
+        "📄 Report",
         "💬 AI Chat"
     ])
 
-    # ========== TAB 1: DASHBOARD ==========
+    # ========== TAB 1: CLINICAL DEVIATIONS ==========
     with tab1:
-        render_dashboard_tab(assessment, face_stats, body_stats)
+        render_deviations_tab(assessment)
 
     # ========== TAB 2: EVIDENCE TIMELINE ==========
     with tab2:
@@ -631,188 +595,293 @@ def render_results_page():
     with tab3:
         render_report_tab()
 
-    # ========== TAB 4: 3D REVIEW ==========
+    # ========== TAB 4: CHATBOT ==========
     with tab4:
-        render_3d_review_tab()
-
-    # ========== TAB 5: CHATBOT ==========
-    with tab5:
         render_chatbot_tab()
 
 
-def render_dashboard_tab(assessment, face_stats, body_stats):
-    """Render the main dashboard with domain scores."""
-    st.markdown("## Domain Scores")
-
-    # Domain score cards
-    cols = st.columns(4)
-    domain_emojis = {
-        'Social Attention': '👁️',
-        'Facial Expression': '😐',
-        'Motor Behavior': '🏃',
-        'Physiological': '💓'
-    }
-
-    for i, (domain, score) in enumerate(
-        assessment.domain_scores.items()
-    ):
-        with cols[i]:
-            emoji = domain_emojis.get(domain, '📊')
-
-            if score < 25:
-                delta_color = "normal"
-                level = "Typical"
-            elif score < 50:
-                delta_color = "off"
-                level = "Borderline"
-            elif score < 75:
-                delta_color = "inverse"
-                level = "Atypical"
-            else:
-                delta_color = "inverse"
-                level = "High Risk"
-
-            st.metric(
-                label=f"{emoji} {domain}",
-                value=f"{score:.0f}/100",
-                delta=level,
-                delta_color=delta_color
-            )
-
+def render_deviations_tab(assessment):
+    """Render clinical deviation analysis."""
+    st.markdown("## Clinical Deviation Analysis")
+    st.markdown(
+        "*Each domain is measured against published neurotypical "
+        "baselines. Deviations are expressed in Standard "
+        "Deviations (SD).*"
+    )
     st.markdown("---")
 
-    # Session Statistics
-    st.markdown("## 📈 Session Statistics")
+    if not hasattr(assessment, 'deviations') or not assessment.deviations:
+        st.info("No deviation data available.")
+        return
 
-    stat_col1, stat_col2 = st.columns(2)
+    # Summary metrics row
+    atypical = [
+        d for d in assessment.deviations
+        if d.clinical_significance == "atypical"
+    ]
+    borderline = [
+        d for d in assessment.deviations
+        if d.clinical_significance == "borderline"
+    ]
+    typical = [
+        d for d in assessment.deviations
+        if d.clinical_significance == "typical"
+    ]
 
-    with stat_col1:
-        st.markdown("### Face Analysis")
-        st.markdown(
-            f"""
-            | Metric | Value |
-            |--------|-------|
-            | Session Duration | {face_stats.get('session_duration_seconds', 0):.0f}s |
-            | Total Blinks | {face_stats.get('total_blinks', 0)} |
-            | Blinks/Minute | {face_stats.get('blinks_per_minute', 0):.1f} |
-            | Gaze Away Time | {face_stats.get('total_gaze_away_seconds', 0):.1f}s |
-            | Gaze Away % | {face_stats.get('gaze_away_percentage', 0):.1f}% |
-            | Expression Variance | {face_stats.get('expression_variance', 0):.4f} |
-            | Gaze Events (>3s) | {len(face_stats.get('gaze_events', []))} |
-            """
+    sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+    with sum_col1:
+        st.metric(
+            "Total Domains",
+            len(assessment.deviations)
+        )
+    with sum_col2:
+        st.metric(
+            "🟢 Typical",
+            len(typical),
+            help="Within 1 SD of baseline"
+        )
+    with sum_col3:
+        st.metric(
+            "🟡 Borderline",
+            len(borderline),
+            help="1-2 SD from baseline"
+        )
+    with sum_col4:
+        st.metric(
+            "🔴 Atypical",
+            len(atypical),
+            help=">2 SD from baseline"
         )
 
-    with stat_col2:
-        st.markdown("### Body Analysis")
-        if body_stats:
-            st.markdown(
-                f"""
-                | Metric | Value |
-                |--------|-------|
-                | Total Frames | {body_stats.get('total_frames_analyzed', 0)} |
-                | Rocking % | {body_stats.get('rocking_percentage', 0):.1f}% |
-                | Flapping % | {body_stats.get('flapping_percentage', 0):.1f}% |
-                | Rocking Frames | {body_stats.get('rocking_detected_frames', 0)} |
-                | Flapping Frames | {body_stats.get('flapping_detected_frames', 0)} |
-                | Duration | {body_stats.get('session_duration', 0):.0f}s |
-                """
-            )
-        else:
-            st.info(
-                "Body analysis was not active "
-                "(single camera mode)."
-            )
-
     st.markdown("---")
 
+    # Individual deviation cards
+    for dev in assessment.deviations:
+        css_class = f"deviation-{dev.clinical_significance}"
+        significance_emoji = {
+            "typical": "🟢",
+            "borderline": "🟡",
+            "atypical": "🔴"
+        }.get(dev.clinical_significance, "⚪")
+
+        z_display = f"{dev.z_score:+.1f} SD"
+
+        # Build the deviation card
+        st.markdown(
+            f'<div class="{css_class}">'
+            f'<b>{significance_emoji} {dev.domain_name}</b> '
+            f'&nbsp;|&nbsp; DSM-5: <code>{dev.dsm5_code}</code> '
+            f'&nbsp;|&nbsp; Z-Score: <b>{z_display}</b>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+        # Expandable details
+        with st.expander(
+            f"Details: {dev.domain_name}", expanded=False
+        ):
+            detail_col1, detail_col2 = st.columns(2)
+
+            with detail_col1:
+                # Value vs baseline
+                if dev.metric_value == -1:
+                    val_str = "No response"
+                elif dev.metric_value < 1:
+                    val_str = f"{dev.metric_value:.4f}"
+                else:
+                    val_str = f"{dev.metric_value:.1f}"
+
+                st.markdown(f"**Measured Value:** {val_str}")
+                st.markdown(
+                    f"**Baseline (Neurotypical):** "
+                    f"{dev.baseline_mean:.1f} ± {dev.baseline_std:.1f}"
+                )
+                st.markdown(f"**Z-Score:** {dev.z_score:+.2f} SD")
+                st.markdown(
+                    f"**Clinical Significance:** "
+                    f"{dev.clinical_significance.upper()}"
+                )
+
+            with detail_col2:
+                st.markdown(f"**Interpretation:**")
+                st.markdown(dev.interpretation)
+
+            # Visual z-score bar
+            render_z_score_bar(dev.z_score, dev.domain_name)
+
+        st.markdown("")
+
     # Recommendations
-    st.markdown("## 💡 Recommendations")
-    for i, rec in enumerate(assessment.recommendations):
-        st.markdown(f"**{i+1}.** {rec}")
+    st.markdown("---")
+    st.markdown("## 💡 Clinical Recommendations")
+
+    if assessment.recommendations:
+        for i, rec in enumerate(assessment.recommendations):
+            st.markdown(f"**{i + 1}.** {rec}")
+    else:
+        st.success(
+            "No specific recommendations. All domains within "
+            "typical range."
+        )
 
     # Summary
     st.markdown("---")
-    st.markdown("## 📝 Summary")
+    st.markdown("## 📝 Session Summary")
     st.info(assessment.summary)
 
 
+def render_z_score_bar(z_score: float, label: str = ""):
+    """
+    Render a visual z-score bar using Streamlit columns.
+    Shows position on a -3 to +3 SD scale.
+    """
+    # Clamp z-score for display
+    z_clamped = max(-3.0, min(3.0, z_score))
+
+    # Create a visual representation
+    # Map z-score to 0-100 percentage (center = 50)
+    position_pct = ((z_clamped + 3.0) / 6.0) * 100
+
+    # Color based on significance
+    z_abs = abs(z_score)
+    if z_abs < 1.0:
+        color = "#2ecc71"
+        bg_zone = "Typical"
+    elif z_abs < 2.0:
+        color = "#f1c40f"
+        bg_zone = "Borderline"
+    else:
+        color = "#e74c3c"
+        bg_zone = "Atypical"
+
+    # Build HTML bar
+    bar_html = f"""
+    <div style="
+        position: relative;
+        height: 30px;
+        background: linear-gradient(to right, 
+            #fdedec 0%, #fdedec 16.7%,
+            #fef9e7 16.7%, #fef9e7 33.3%,
+            #d5f5e3 33.3%, #d5f5e3 66.7%,
+            #fef9e7 66.7%, #fef9e7 83.3%,
+            #fdedec 83.3%, #fdedec 100%
+        );
+        border-radius: 4px;
+        margin: 5px 0;
+        border: 1px solid #ddd;
+    ">
+        <!-- Center line -->
+        <div style="
+            position: absolute; left: 50%; top: 0;
+            width: 2px; height: 100%;
+            background: #888;
+        "></div>
+        
+        <!-- SD markers -->
+        <div style="position:absolute; left:16.7%; top:0; width:1px; height:100%; background:#ccc;"></div>
+        <div style="position:absolute; left:33.3%; top:0; width:1px; height:100%; background:#ccc;"></div>
+        <div style="position:absolute; left:66.7%; top:0; width:1px; height:100%; background:#ccc;"></div>
+        <div style="position:absolute; left:83.3%; top:0; width:1px; height:100%; background:#ccc;"></div>
+        
+        <!-- Marker -->
+        <div style="
+            position: absolute;
+            left: {position_pct}%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 18px; height: 18px;
+            background: {color};
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        "></div>
+        
+        <!-- Labels -->
+        <div style="position:absolute; left:2px; bottom:-16px; font-size:10px; color:#999;">-3σ</div>
+        <div style="position:absolute; left:16%; bottom:-16px; font-size:10px; color:#999;">-2σ</div>
+        <div style="position:absolute; left:32%; bottom:-16px; font-size:10px; color:#999;">-1σ</div>
+        <div style="position:absolute; left:49%; bottom:-16px; font-size:10px; color:#999;">0</div>
+        <div style="position:absolute; left:65%; bottom:-16px; font-size:10px; color:#999;">+1σ</div>
+        <div style="position:absolute; left:82%; bottom:-16px; font-size:10px; color:#999;">+2σ</div>
+        <div style="position:absolute; right:2px; bottom:-16px; font-size:10px; color:#999;">+3σ</div>
+    </div>
+    <div style="height: 20px;"></div>
+    """
+    st.markdown(bar_html, unsafe_allow_html=True)
+
+
 def render_evidence_tab(assessment):
-    """Render the evidence timeline with screenshots."""
+    """Render evidence timeline with screenshots."""
     st.markdown("## 🔍 Visual Evidence Timeline")
-    st.markdown(
-        "*Each entry represents a moment where the AI detected "
-        "an atypical behavioral marker.*"
-    )
 
     if not assessment.evidence_items:
         st.success(
-            "✅ No significant behavioral markers were flagged "
+            "✅ No behavioral markers were flagged "
             "during this session."
         )
         return
 
-    # Filter controls
+    # Filters
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
         severity_filter = st.multiselect(
-            "Filter by Severity",
+            "Severity",
             options=["high", "medium", "low"],
             default=["high", "medium", "low"]
         )
     with filter_col2:
-        category_filter = st.multiselect(
-            "Filter by Category",
-            options=list(set(
-                e.category for e in assessment.evidence_items
-            )),
-            default=list(set(
-                e.category for e in assessment.evidence_items
-            ))
+        categories = list(set(
+            e.category for e in assessment.evidence_items
+        ))
+        cat_filter = st.multiselect(
+            "Category",
+            options=categories,
+            default=categories
         )
 
-    filtered_evidence = [
+    filtered = [
         e for e in assessment.evidence_items
         if e.severity in severity_filter
-        and e.category in category_filter
+        and e.category in cat_filter
     ]
 
     st.markdown(
-        f"**Showing {len(filtered_evidence)} of "
-        f"{len(assessment.evidence_items)} evidence items**"
+        f"**Showing {len(filtered)} of "
+        f"{len(assessment.evidence_items)} items**"
     )
     st.markdown("---")
 
-    # Render each evidence item
-    for i, evidence in enumerate(filtered_evidence):
-        severity_colors = {
-            'high': '🔴',
-            'medium': '🟡',
-            'low': '🟢'
+    for evidence in filtered:
+        sev_icons = {
+            'high': '🔴', 'medium': '🟡', 'low': '🟢'
         }
-        sev_emoji = severity_colors.get(evidence.severity, '⚪')
+        icon = sev_icons.get(evidence.severity, '⚪')
 
-        # Evidence card
         with st.container():
             ev_col1, ev_col2 = st.columns([3, 2])
 
             with ev_col1:
                 st.markdown(
-                    f"### {sev_emoji} "
-                    f"[{evidence.session_time_str}] "
+                    f"### {icon} [{evidence.session_time_str}] "
                     f"{evidence.category.upper()}"
                 )
                 st.markdown(
-                    f"**Severity:** {evidence.severity.upper()} "
-                    f"| **Confidence:** "
+                    f"**Severity:** {evidence.severity.upper()} | "
+                    f"**Confidence:** "
                     f"{evidence.confidence * 100:.0f}%"
                 )
+
+                if evidence.z_score != 0:
+                    st.markdown(
+                        f"**Z-Score:** {evidence.z_score:+.1f} SD"
+                    )
+
                 st.markdown(evidence.description)
 
                 if evidence.metric_name:
                     st.caption(
-                        f"📏 Metric: `{evidence.metric_name}` = "
-                        f"**{evidence.metric_value:.1f}** "
-                        f"(threshold: {evidence.threshold_value:.1f})"
+                        f"Metric: `{evidence.metric_name}` = "
+                        f"**{evidence.metric_value:.1f}**"
                     )
 
             with ev_col2:
@@ -829,51 +898,37 @@ def render_evidence_tab(assessment):
                         )
                         st.image(
                             screenshot_rgb,
-                            caption=(
-                                f"Evidence @ "
-                                f"{evidence.session_time_str}"
-                            ),
+                            caption=f"@ {evidence.session_time_str}",
                             use_container_width=True
                         )
-                else:
-                    st.markdown(
-                        "*Screenshot not available*"
-                    )
 
         st.markdown("---")
 
 
 def render_report_tab():
-    """Render the PDF report download section."""
+    """PDF report download section."""
     st.markdown("## 📄 Diagnostic Evidence Report")
-    st.markdown(
-        "Download the comprehensive PDF report containing "
-        "all screening data, visual evidence, and "
-        "recommendations."
-    )
 
     report_path = st.session_state.report_path
+    assessment = st.session_state.assessment
 
     if report_path and Path(report_path).exists():
-        st.success(
-            f"✅ Report generated successfully!"
-        )
+        st.success("✅ Report generated!")
 
-        # Report preview info
-        assessment = st.session_state.assessment
         st.markdown(
             f"""
             **Report Contents:**
-            - 📋 Executive Summary
-            - 📊 Domain Risk Scores (4 domains)
-            - 🔍 Visual Evidence Timeline ({len(assessment.evidence_items)} items)
-            - 💡 Clinical Recommendations ({len(assessment.recommendations)} items)
-            - 🔬 Technical Methodology
-            - ⚠️ Clinical Disclaimers
+            - Clinical Deviation Analysis 
+              ({len(assessment.deviations)} domains)
+            - Visual Evidence Timeline 
+              ({len(assessment.evidence_items)} items)
+            - Recommendations 
+              ({len(assessment.recommendations)} items)
+            - DSM-5-TR Mapping
+            - Technical Methodology with Citations
             """
         )
 
-        # Download button
         with open(report_path, "rb") as f:
             pdf_data = f.read()
 
@@ -888,149 +943,76 @@ def render_report_tab():
 
         st.markdown("---")
 
-        # Also show raw data
+        # Raw data export
         with st.expander("🔧 Raw Session Data (JSON)"):
-            raw_data = {
-                "assessment": {
-                    "risk_score": assessment.overall_risk_score,
-                    "risk_level": assessment.risk_level,
-                    "domain_scores": assessment.domain_scores,
-                    "summary": assessment.summary,
-                    "recommendations": assessment.recommendations,
-                    "evidence_count": len(
-                        assessment.evidence_items
-                    )
-                },
+            import json
+
+            # Build exportable data
+            deviation_data = []
+            for d in assessment.deviations:
+                deviation_data.append({
+                    "domain": d.domain_name,
+                    "dsm5": d.dsm5_code,
+                    "value": d.metric_value,
+                    "baseline_mean": d.baseline_mean,
+                    "baseline_std": d.baseline_std,
+                    "z_score": d.z_score,
+                    "significance": d.clinical_significance,
+                    "interpretation": d.interpretation,
+                })
+
+            raw = {
+                "risk_level": assessment.risk_level,
+                "deviations": deviation_data,
+                "recommendations": assessment.recommendations,
+                "summary": assessment.summary,
                 "face_stats": st.session_state.face_stats,
-                "body_stats": st.session_state.body_stats,
+                "evidence_count": len(assessment.evidence_items),
             }
-            st.json(raw_data)
+            st.json(raw)
+
+            # Download JSON
+            json_str = json.dumps(raw, indent=2)
+            st.download_button(
+                "📥 Download JSON Data",
+                data=json_str,
+                file_name="neurolens_session_data.json",
+                mime="application/json"
+            )
 
     else:
-        st.error(
-            "❌ Report file not found. Try running the "
-            "screening session again."
-        )
-
-
-def render_3d_review_tab():
-    """
-    Render the 3D model review tab showing the
-    last captured 3D avatars.
-    """
-    st.markdown("## 🧍 3D Digital Twin Review")
-    st.markdown(
-        "Interactive 3D models reconstructed from the "
-        "screening session. Rotate and zoom to inspect "
-        "posture and landmarks."
-    )
-
-    model_col1, model_col2 = st.columns(2)
-
-    with model_col1:
-        st.markdown("### Face Mesh (3D)")
-        last_face = st.session_state.last_face_result
-        if (
-            last_face is not None
-            and last_face.face_detected
-            and last_face.landmarks_3d is not None
-        ):
-            fig = create_face_avatar_3d(
-                last_face.landmarks_3d,
-                gaze_direction=last_face.gaze.gaze_direction,
-                expression=last_face.emotion.expression_label
-            )
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="results_face_3d"
-            )
-        else:
-            st.info("No face 3D data captured.")
-
-    with model_col2:
-        st.markdown("### Body Skeleton (3D)")
-        last_body = st.session_state.last_body_result
-        if (
-            last_body is not None
-            and last_body.pose_detected
-            and last_body.landmarks_3d is not None
-        ):
-            movement_flags = {
-                'is_rocking': last_body.is_rocking,
-                'is_hand_flapping': last_body.is_hand_flapping,
-            }
-            fig = create_pose_avatar_3d(
-                last_body.landmarks_3d,
-                title="Last Captured Body Pose",
-                movement_flags=movement_flags
-            )
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                key="results_body_3d"
-            )
-        else:
-            st.info(
-                "No body 3D data captured. "
-                "(Enable dual camera mode for body tracking)"
-            )
-
-    st.markdown("---")
-    st.markdown(
-        """
-        **About the Digital Twin:**
-        - Face Mesh: 468 3D landmarks from MediaPipe Face Mesh 
-          with iris tracking refinement
-        - Body Skeleton: 33 3D landmarks from MediaPipe Pose
-        - All coordinates are in normalized space (0-1)
-        - Z-axis represents estimated depth relative to camera
-        - Interactive: Click and drag to rotate, scroll to zoom
-        """
-    )
+        st.error("❌ Report not found. Try screening again.")
 
 
 def render_chatbot_tab():
-    """Render the AI chatbot interface."""
+    """AI chatbot interface."""
     st.markdown("## 💬 NeuroLens AI Assistant")
     st.markdown(
-        "Ask questions about the screening results, autism "
-        "spectrum disorder, next steps, or child development."
+        "Ask about the screening results, autism, "
+        "next steps, or child development."
     )
 
     chatbot = st.session_state.chatbot
-
-    if chatbot is None:
+    if not chatbot:
         st.error("Chatbot not initialized.")
         return
 
     if not chatbot.is_configured:
         st.warning(
-            "⚠️ Gemini API key not configured. Using basic "
-            "responses. Set the `GEMINI_API_KEY` environment "
-            "variable for full AI chat capabilities."
+            "⚠️ Gemini API not configured. "
+            "Using basic responses. "
+            "Set GEMINI_API_KEY in .env for full AI chat."
         )
 
-    # Chat history display
-    chat_container = st.container()
-
-    with chat_container:
-        # Display existing messages
-        for msg in st.session_state.chat_messages:
-            role = msg['role']
-            content = msg['content']
-
-            if role == 'user':
-                with st.chat_message("user", avatar="👤"):
-                    st.markdown(content)
-            else:
-                with st.chat_message("assistant", avatar="🧠"):
-                    st.markdown(content)
+    # Display chat history
+    for msg in st.session_state.chat_messages:
+        avatar = "👤" if msg['role'] == 'user' else "🧠"
+        with st.chat_message(msg['role'], avatar=avatar):
+            st.markdown(msg['content'])
 
     # Chat input
     user_input = st.chat_input(
-        "Ask about the screening results...",
-        key="chat_input"
+        "Ask about the screening results..."
     )
 
     if user_input:
@@ -1040,96 +1022,91 @@ def render_chatbot_tab():
             'content': user_input
         })
 
-        # Get AI response
+        # Get response
         with st.spinner("Thinking..."):
             response = chatbot.send_message(user_input)
 
-        # Add assistant message
         st.session_state.chat_messages.append({
             'role': 'assistant',
             'content': response
         })
-
         st.rerun()
 
-    # Quick question buttons
+    # Quick questions
     st.markdown("---")
     st.markdown("**Quick Questions:**")
 
-    quick_col1, quick_col2 = st.columns(2)
+    q_col1, q_col2 = st.columns(2)
 
-    with quick_col1:
+    with q_col1:
         if st.button(
             "📊 Explain my results",
             use_container_width=True
         ):
-            _send_quick_question(
+            _quick_q(
                 chatbot,
-                "Can you explain what my screening results mean "
-                "in simple terms?"
+                "Explain my screening results in simple terms. "
+                "What do the z-scores and standard deviations mean?"
             )
 
         if st.button(
             "🏥 What are the next steps?",
             use_container_width=True
         ):
-            _send_quick_question(
+            _quick_q(
                 chatbot,
-                "Based on these results, what should my "
-                "next steps be?"
+                "Based on these results, what should my next "
+                "steps be? Who should I consult?"
             )
 
-    with quick_col2:
+    with q_col2:
         if st.button(
-            "👁️ What does 'gaze avoidance' mean?",
+            "🔊 What does name-call latency mean?",
             use_container_width=True
         ):
-            _send_quick_question(
+            _quick_q(
                 chatbot,
-                "What does gaze avoidance mean in the context "
-                "of autism screening?"
+                "What does the name-call response latency "
+                "test measure and why is it important for "
+                "autism screening?"
             )
 
         if st.button(
-            "🧒 Early signs of autism",
+            "😊 Explain emotional reciprocity",
             use_container_width=True
         ):
-            _send_quick_question(
+            _quick_q(
                 chatbot,
-                "What are the early signs of autism in toddlers "
-                "that parents should watch for?"
+                "What is emotional reciprocity and why is "
+                "the smile-back test important in autism "
+                "screening?"
             )
 
 
-def _send_quick_question(chatbot, question: str):
-    """Handle quick question button clicks."""
+def _quick_q(chatbot, question: str):
+    """Handle quick question button."""
     st.session_state.chat_messages.append({
-        'role': 'user',
-        'content': question
+        'role': 'user', 'content': question
     })
     response = chatbot.send_message(question)
     st.session_state.chat_messages.append({
-        'role': 'assistant',
-        'content': response
+        'role': 'assistant', 'content': response
     })
     st.rerun()
 
 
 # =============================================
-# MAIN APP ROUTER
+# MAIN ROUTER
 # =============================================
 def main():
-    """Main application entry point and router."""
-    session_duration = render_sidebar()
+    render_sidebar()
 
     if st.session_state.app_state == 'setup':
-        render_setup_page()
-
+        render_setup()
     elif st.session_state.app_state == 'screening':
-        render_screening_page(session_duration)
-
+        render_screening()
     elif st.session_state.app_state == 'results':
-        render_results_page()
+        render_results()
 
 
 if __name__ == "__main__":

@@ -245,6 +245,8 @@ def start_session():
 # =============================================
 # SCREENING PAGE (NO FLICKERING)
 # =============================================
+# main.py - Replace render_screening() completely
+
 def render_screening():
     st.markdown(
         "<h2 style='text-align:center;'>🔴 Live Screening</h2>",
@@ -255,10 +257,8 @@ def render_screening():
     stim = st.session_state.stimulus_engine
     risk_eng = st.session_state.risk_engine
 
-    # Layout
-    timer_col1, timer_col2, timer_col3 = st.columns(3)
+    # Stop button (OUTSIDE the loop)
     stop_col1, stop_col2, stop_col3 = st.columns([1, 1, 1])
-
     with stop_col2:
         stop_button = st.button(
             "⏹️ STOP SCREENING",
@@ -272,12 +272,15 @@ def render_screening():
 
     st.markdown("---")
 
-    # Phase banner placeholder
+    # ALL placeholders created ONCE, OUTSIDE the loop
     phase_placeholder = st.empty()
+    timer_placeholder = st.empty()
+    progress_placeholder = st.empty()
 
-    # Two columns: Camera | Stimulus
+    st.markdown("---")
+
+    # Two columns for camera and stimulus
     cam_col, stim_col = st.columns(2)
-
     with cam_col:
         st.markdown("### 📹 Subject Camera")
         video_placeholder = st.empty()
@@ -288,17 +291,14 @@ def render_screening():
         stimulus_placeholder = st.empty()
         stim_info_placeholder = st.empty()
 
-    # Audio placeholder (hidden)
+    # Audio (hidden)
     audio_placeholder = st.empty()
 
-    # Evidence log
+    # Evidence
     st.markdown("### 📋 Live Evidence")
     evidence_placeholder = st.empty()
 
-    # Progress
-    progress_placeholder = st.empty()
-
-    # ---- MAIN LOOP (no st.rerun!) ----
+    # ---- CAMERA + MAIN LOOP ----
     cap = cv2.VideoCapture(LAPTOP_CAM_INDEX)
     if not cap.isOpened():
         st.error("❌ Cannot open camera")
@@ -308,186 +308,235 @@ def render_screening():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    keep_running = True
+    try:
+        while True:
+            elapsed = time.time() - st.session_state.session_start
 
-    while keep_running:
-        elapsed = time.time() - st.session_state.session_start
+            # Auto-stop
+            if elapsed >= SESSION_DURATION_SECONDS:
+                break
 
-        # Check session duration
-        if elapsed >= SESSION_DURATION_SECONDS:
-            cap.release()
-            stop_session()
-            return
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.01)
+                continue
 
-        # Read camera frame
-        ret, frame = cap.read()
-        if not ret:
-            time.sleep(0.01)
-            continue
+            # ---- ANALYZE ----
+            face_result = face_az.analyze_frame(frame)
+            st.session_state.frame_count += 1
 
-        # Analyze face
-        face_result = face_az.analyze_frame(frame)
-        st.session_state.frame_count += 1
+            if face_result.face_detected:
+                risk_eng.process_face_result(face_result, frame)
 
-        # Process through risk engine
-        if face_result.face_detected:
-            risk_eng.process_face_result(face_result, frame)
-
-        # Get stimulus data
-        gaze_dir = (
-            face_result.gaze.gaze_direction
-            if face_result.face_detected else "unknown"
-        )
-        is_looking = (
-            face_result.gaze.is_looking_at_camera
-            if face_result.face_detected else False
-        )
-        head_yaw = (
-            face_result.gaze.head_pose_yaw
-            if face_result.face_detected else 0.0
-        )
-        smile_score = (
-            face_result.emotion.smile_score
-            if face_result.face_detected else 0.0
-        )
-
-        stim_result = stim.update(
-            gaze_direction=gaze_dir,
-            is_looking=is_looking,
-            head_yaw=head_yaw,
-            smile_score=smile_score,
-        )
-
-        # ---- UPDATE UI (in-place, no rerun) ----
-
-        # Timer
-        remaining = max(0, SESSION_DURATION_SECONDS - elapsed)
-        with timer_col1:
-            timer_col1.metric("⏱️ Elapsed", f"{int(elapsed)}s")
-        with timer_col2:
-            timer_col2.metric("⏳ Remaining", f"{int(remaining)}s")
-        with timer_col3:
-            timer_col3.metric(
-                "📊 Phase",
-                stim_result["phase"].replace("_", " ").title()
+            # Extract behavioral data for stimulus engine
+            gaze_dir = (
+                face_result.gaze.gaze_direction
+                if face_result.face_detected else "unknown"
+            )
+            is_looking = (
+                face_result.gaze.is_looking_at_camera
+                if face_result.face_detected else False
+            )
+            head_yaw = (
+                face_result.gaze.head_pose_yaw
+                if face_result.face_detected else 0.0
+            )
+            smile_score = (
+                face_result.emotion.smile_score
+                if face_result.face_detected else 0.0
             )
 
-        # Phase banner
-        phase = stim_result["phase"]
-        phase_classes = {
-            "baseline": "phase-baseline",
-            "social_geo": "phase-social",
-            "name_call": "phase-namecall",
-            "smile_prompt": "phase-smile",
-            "cooldown": "phase-cooldown",
-        }
-        css_class = phase_classes.get(phase, "phase-baseline")
-        phase_placeholder.markdown(
-            f'<div class="phase-banner {css_class}">'
-            f'{stim_result["instruction"]}</div>',
-            unsafe_allow_html=True
-        )
-
-        # Camera feed
-        if face_result.annotated_frame is not None:
-            display = cv2.cvtColor(
-                face_result.annotated_frame, cv2.COLOR_BGR2RGB
-            )
-            video_placeholder.image(
-                display, channels="RGB",
-                use_container_width=True
+            stim_result = stim.update(
+                gaze_direction=gaze_dir,
+                is_looking=is_looking,
+                head_yaw=head_yaw,
+                smile_score=smile_score,
             )
 
-        # Face metrics
-        if face_result.face_detected:
-            contact = (
-                "✅ Yes"
-                if face_result.gaze.is_looking_at_camera
-                else "❌ No"
+            # ---- UPDATE UI (all using .empty() placeholders) ----
+
+            phase = stim_result["phase"]
+            remaining = max(0, SESSION_DURATION_SECONDS - elapsed)
+
+            # Phase banner
+            phase_classes = {
+                "baseline": ("phase-baseline", "🔬"),
+                "social_geo": ("phase-social", "👁️"),
+                "name_call": ("phase-namecall", "🔊"),
+                "smile_prompt": ("phase-smile", "😊"),
+                "cooldown": ("phase-cooldown", "⏸️"),
+            }
+            css_class, phase_icon = phase_classes.get(
+                phase, ("phase-baseline", "📊")
             )
-            metrics_placeholder.markdown(
-                f"**Eye Contact:** {contact} | "
-                f"**Gaze:** {face_result.gaze.gaze_direction} | "
-                f"**Expr:** {face_result.emotion.expression_label} | "
-                f"**Blinks:** {face_az.blink_total} | "
-                f"**Smile:** {face_result.emotion.smile_score:.2f}"
+            phase_placeholder.markdown(
+                f'<div class="phase-banner {css_class}">'
+                f'{phase_icon} {stim_result["instruction"]}</div>',
+                unsafe_allow_html=True
             )
 
-        # Stimulus display
-        stim_frame = stim_result.get("stimulus_frame")
-        if stim_frame is not None:
-            stim_rgb = cv2.cvtColor(stim_frame, cv2.COLOR_BGR2RGB)
-            stimulus_placeholder.image(
-                stim_rgb, channels="RGB",
-                use_container_width=True
+            # Timer - single row using markdown table
+            phase_display = phase.replace("_", " ").title()
+            timer_placeholder.markdown(
+                f"| ⏱️ Elapsed | ⏳ Remaining | 📊 Phase | 🎞️ Frames |\n"
+                f"|:---:|:---:|:---:|:---:|\n"
+                f"| **{int(elapsed)}s** | **{int(remaining)}s** | "
+                f"**{phase_display}** | **{st.session_state.frame_count}** |"
             )
 
-        # Stimulus metrics
-        if phase == "social_geo":
-            sg = stim.social_geo_metrics
-            stim_info_placeholder.markdown(
-                f"**Social:** {sg.social_preference_pct:.0f}% | "
-                f"**Geometric:** {sg.geometric_preference_pct:.0f}% | "
-                f"**Away:** {sg.gaze_away_frames} frames"
+            # Progress bar
+            progress_placeholder.progress(
+                min(elapsed / SESSION_DURATION_SECONDS, 1.0),
+                text=(
+                    f"Protocol: {elapsed:.0f}/"
+                    f"{SESSION_DURATION_SECONDS}s"
+                )
             )
-        elif phase == "name_call":
-            nc = stim.name_call_metrics
-            if nc.responded:
-                stim_info_placeholder.success(
-                    f"✅ Response detected! "
-                    f"Latency: {nc.response_latency_ms:.0f}ms"
+
+            # Camera feed
+            if face_result.annotated_frame is not None:
+                display = cv2.cvtColor(
+                    face_result.annotated_frame, cv2.COLOR_BGR2RGB
+                )
+                video_placeholder.image(
+                    display, channels="RGB",
+                    use_container_width=True
+                )
+
+            # Face metrics
+            if face_result.face_detected:
+                contact = (
+                    "✅ Yes"
+                    if face_result.gaze.is_looking_at_camera
+                    else "❌ No"
+                )
+                metrics_placeholder.markdown(
+                    f"**Eye Contact:** {contact} | "
+                    f"**Gaze:** {gaze_dir} | "
+                    f"**Expr:** "
+                    f"{face_result.emotion.expression_label} | "
+                    f"**Blinks:** {face_az.blink_total} | "
+                    f"**Smile:** {smile_score:.2f}"
                 )
             else:
-                stim_info_placeholder.info(
-                    "⏳ Waiting for head-turn response..."
+                metrics_placeholder.warning("No face detected")
+
+            # Stimulus display
+            stim_frame = stim_result.get("stimulus_frame")
+            if stim_frame is not None:
+                stim_rgb = cv2.cvtColor(
+                    stim_frame, cv2.COLOR_BGR2RGB
                 )
-        elif phase == "smile_prompt":
-            rc = stim.reciprocity_tracker.get_live_metrics()
-            stim_info_placeholder.markdown(
-                f"**Smile-back:** "
-                f"{rc['smile_reciprocity_pct']:.0f}% | "
-                f"**Peak:** {rc['peak_intensity']:.2f} | "
-                f"**Episodes:** {rc['smile_episodes']} | "
-                f"**Mirroring:** {rc['mirroring_events']} events"
-            )
-            if rc['is_currently_smiling']:
+                stimulus_placeholder.image(
+                    stim_rgb, channels="RGB",
+                    use_container_width=True
+                )
+
+            # Stimulus-specific info
+            if phase == "social_geo":
+                sg = stim.social_geo_metrics
                 stim_info_placeholder.markdown(
-                    f"😊 **SMILING NOW** "
-                    f"(duration: {rc['current_smile_duration_ms']:.0f}ms)"
+                    f"**Social:** "
+                    f"{sg.social_preference_pct:.0f}% | "
+                    f"**Geometric:** "
+                    f"{sg.geometric_preference_pct:.0f}% | "
+                    f"**Away:** {sg.gaze_away_frames} frames"
+                )
+            elif phase == "name_call":
+                nc = stim.name_call_metrics
+                if nc.responded:
+                    stim_info_placeholder.success(
+                        f"✅ Response! Latency: "
+                        f"{nc.response_latency_ms:.0f}ms"
+                    )
+                elif stim._name_call_audio_played:
+                    stim_info_placeholder.warning(
+                        "⏳ Waiting for head-turn response..."
+                    )
+                else:
+                    stim_info_placeholder.info(
+                        "Preparing audio stimulus..."
+                    )
+            elif phase == "smile_prompt":
+                if hasattr(stim, 'reciprocity_tracker'):
+                    rc = stim.reciprocity_tracker.get_live_metrics()
+                    info_text = (
+                        f"**Smile-back:** "
+                        f"{rc['smile_reciprocity_pct']:.0f}% | "
+                        f"**Peak:** {rc['peak_intensity']:.2f} | "
+                        f"**Episodes:** {rc['smile_episodes']}"
+                    )
+                    if rc['is_currently_smiling']:
+                        info_text += (
+                            f"\n\n😊 **SMILING NOW** "
+                            f"({rc['current_smile_duration_ms']:.0f}ms)"
+                        )
+                    stim_info_placeholder.markdown(info_text)
+                else:
+                    rc_m = stim.reciprocity_metrics
+                    stim_info_placeholder.markdown(
+                        f"**Smile-back:** "
+                        f"{rc_m.smile_reciprocity_pct:.0f}% | "
+                        f"**Peak:** "
+                        f"{rc_m.peak_smile_score:.2f}"
+                    )
+            elif phase == "cooldown":
+                stim_info_placeholder.info(
+                    f"Post-stimulus observation. "
+                    f"Ending in {int(remaining)}s..."
+                )
+            elif phase == "baseline":
+                stim_info_placeholder.info(
+                    "Observing natural behavior (no stimulus)"
                 )
 
-        # Audio trigger
-        if stim_result.get("play_audio"):
-            audio_html = get_audio_html(NAME_CALL_AUDIO)
-            if audio_html:
-                audio_placeholder.markdown(
-                    audio_html, unsafe_allow_html=True
+            # Audio trigger
+            if stim_result.get("play_audio"):
+                audio_html = get_audio_html(NAME_CALL_AUDIO)
+                if audio_html:
+                    audio_placeholder.markdown(
+                        audio_html, unsafe_allow_html=True
+                    )
+
+            # Evidence log
+            if risk_eng.evidence:
+                ev_lines = []
+                for ev in risk_eng.evidence[-4:]:
+                    sev_icon = {
+                        'high': '🔴',
+                        'medium': '🟡',
+                        'low': '🟢'
+                    }.get(ev.severity, '⚪')
+                    short_desc = (
+                        ev.description[:90] + "..."
+                        if len(ev.description) > 90
+                        else ev.description
+                    )
+                    ev_lines.append(
+                        f"{sev_icon} **[{ev.session_time_str}]** "
+                        f"{ev.category}: {short_desc}"
+                    )
+                evidence_placeholder.markdown(
+                    "\n\n".join(ev_lines)
+                )
+            else:
+                evidence_placeholder.info(
+                    "No markers flagged yet. Monitoring..."
                 )
 
-        # Evidence log
-        if risk_eng.evidence:
-            ev_lines = []
-            for ev in risk_eng.evidence[-3:]:
-                sev_icon = {
-                    'high': '🔴', 'medium': '🟡', 'low': '🟢'
-                }.get(ev.severity, '⚪')
-                ev_lines.append(
-                    f"{sev_icon} **[{ev.session_time_str}]** "
-                    f"{ev.category}: "
-                    f"{ev.description[:80]}..."
-                )
-            evidence_placeholder.markdown("\n\n".join(ev_lines))
+            # Frame rate control (~20 fps)
+            time.sleep(0.05)
 
-        # Progress bar
-        progress_placeholder.progress(
-            min(elapsed / SESSION_DURATION_SECONDS, 1.0),
-            text=f"Session: {elapsed:.0f}/{SESSION_DURATION_SECONDS}s"
-        )
+    except Exception as e:
+        st.error(f"Screening error: {e}")
+        import traceback
+        traceback.print_exc()
 
-        # Frame rate control
-        time.sleep(0.05)
+    finally:
+        cap.release()
 
-    cap.release()
+    # Session ended naturally (timer ran out)
+    stop_session()
 
 
 def stop_session():

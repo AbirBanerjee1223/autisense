@@ -533,18 +533,36 @@ class ReportGenerator:
                 pdf.set_font('Helvetica', 'I', 8)
                 pdf.set_text_color(120, 120, 120)
 
-                # Build metric string based on available fields
                 metric_str = (
                     f"Metric: {evidence.metric_name} = "
                     f"{evidence.metric_value:.1f}"
                 )
 
-                # Use z_score and baseline if available
-                if evidence.z_score is not None and evidence.baseline_mean is not None:
+                if (
+                    hasattr(evidence, 'z_score')
+                    and evidence.z_score != 0
+                ):
                     metric_str += (
-                        f" (Baseline: {evidence.baseline_mean:.1f}, "
-                        f"Z-Score: {evidence.z_score:+.1f} SD)"
+                        f" (z={evidence.z_score:+.1f} SD"
                     )
+                    if (
+                        hasattr(evidence, 'baseline_mean')
+                        and evidence.baseline_mean > 0
+                    ):
+                        metric_str += (
+                            f", baseline: "
+                            f"{evidence.baseline_mean:.1f}"
+                            f"+-{evidence.baseline_std:.1f}"
+                        )
+                    metric_str += ")"
+                elif hasattr(evidence, 'threshold_value'):
+                    metric_str += (
+                        f" (threshold: "
+                        f"{evidence.threshold_value:.1f})"
+                    )
+
+                pdf.cell(120, 4, metric_str)
+                pdf.ln(5)
 
             # Screenshot (if available)
             if (

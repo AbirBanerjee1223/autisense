@@ -337,9 +337,10 @@ class FaceAnalyzer:
             emotion.expression_label = "surprised/vocalizing"
         elif emotion.smile_score > 0.4:
             emotion.expression_label = "smiling"
-        elif (mouth_frown_left + mouth_frown_right) / 2 > 0.3:
-            emotion.expression_label = "frowning"
-        elif emotion.expression_variance < 0.02:
+        elif (
+            emotion.expression_variance < 0.02
+            and len(self.expression_history) > 60  # ADDED: need 2+ seconds
+        ):
             emotion.expression_label = "flat_affect"
         else:
             emotion.expression_label = "neutral"

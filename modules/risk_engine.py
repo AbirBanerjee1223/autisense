@@ -1,4 +1,4 @@
-# modules/risk_engine.py (COMPLETE FILE - Clinical Deviations)
+# modules/risk_engine.py (COMPLETE FILE - ALL FIXES APPLIED)
 
 import time
 import cv2
@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from config import EVIDENCE_DIR, BASELINES
 
+
+# =============================================
+# DATA CLASSES
+# =============================================
 
 @dataclass
 class EvidenceItem:
@@ -35,25 +39,7 @@ class ClinicalDeviation:
     baseline_std: float = 0.0
     z_score: float = 0.0
     interpretation: str = ""
-    clinical_significance: str = ""
-
-
-def compute_z_score(value: float, mean: float, std: float) -> float:
-    """Compute standard deviation distance from baseline."""
-    if std == 0:
-        return 0.0
-    return (value - mean) / std
-
-
-def interpret_z_score(z: float, higher_is_worse: bool = True) -> str:
-    """Interpret a z-score clinically."""
-    z_abs = abs(z)
-    if z_abs < 1.0:
-        return "typical"
-    elif z_abs < 2.0:
-        return "borderline"
-    else:
-        return "atypical"
+    clinical_significance: str = ""  # typical, borderline, atypical
 
 
 @dataclass
@@ -68,23 +54,110 @@ class RiskAssessment:
     domain_scores: dict = field(default_factory=dict)
 
 
+# =============================================
+# HELPER FUNCTIONS (FIXED)
+# =============================================
+
+def compute_z_score(value: float, mean: float, std: float) -> float:
+    """
+    Compute standard deviation distance from baseline.
+    Clamped to [-4, +4] to prevent absurd outliers
+    from data collection artifacts.
+    """
+    if std == 0:
+        return 0.0
+    z = (value - mean) / std
+    return max(-4.0, min(4.0, z))
+
+
+def interpret_z_score(
+    z: float,
+    higher_is_worse: bool = True
+) -> str:
+    """
+    Interpret a z-score clinically WITH PROPER DIRECTIONALITY.
+
+    Args:
+        z: The z-score value
+        higher_is_worse: 
+            True  = Only POSITIVE z is concerning
+                    (e.g., more gaze away, longer latency)
+            False = Only NEGATIVE z is concerning
+                    (e.g., less social preference, less smiling)
+
+    Examples:
+        Gaze away 3% when baseline is 25%:
+            z = -2.2, higher_is_worse=True -> "typical"
+            (Less gaze away = GOOD, not flagged)
+
+        Gaze away 50% when baseline is 25%:
+            z = +2.5, higher_is_worse=True -> "atypical"
+            (More gaze away = BAD, flagged)
+
+        Social preference 30% when baseline is 70%:
+            z = -3.3, higher_is_worse=False -> "atypical"
+            (Less social preference = BAD, flagged)
+    """
+    if higher_is_worse:
+        # Only flag when value is ABOVE baseline (positive z)
+        if z > 2.0:
+            return "atypical"
+        elif z > 1.0:
+            return "borderline"
+        else:
+            return "typical"
+    else:
+        # Only flag when value is BELOW baseline (negative z)
+        if z < -2.0:
+            return "atypical"
+        elif z < -1.0:
+            return "borderline"
+        else:
+            return "typical"
+
+
+def interpret_z_score_bilateral(z: float) -> str:
+    """
+    For metrics where BOTH high and low are concerning.
+    (e.g., blink rate: too low OR too high = atypical)
+    """
+    z_abs = abs(z)
+    if z_abs > 2.0:
+        return "atypical"
+    elif z_abs > 1.0:
+        return "borderline"
+    else:
+        return "typical"
+
+
+# =============================================
+# RISK ENGINE
+# =============================================
+
 class RiskEngine:
     """
     Clinical Risk Engine using Standard Deviation analysis.
-    
-    Computes how many standard deviations each behavioral
-    metric deviates from published neurotypical baselines,
-    rather than using arbitrary 0-100 scores.
+
+    Instead of arbitrary 0-100 scores, computes how many
+    standard deviations each behavioral metric deviates
+    from published neurotypical baselines.
+
+    Directionality is handled properly:
+    - Gaze away: only HIGH values are concerning
+    - Social preference: only LOW values are concerning
+    - Blink rate: BOTH extremes are concerning
     """
 
     def __init__(self, session_start_time: float):
         self.session_start = session_start_time
         self.evidence: List[EvidenceItem] = []
 
+        # Running tallies
         self.gaze_away_frames = 0
         self.total_face_frames = 0
         self.flat_affect_frames = 0
 
+        # Cooldowns to prevent duplicate evidence
         self._last_gaze_flag = 0.0
         self._last_expression_flag = 0.0
         self._last_motor_flag = 0.0
@@ -118,6 +191,10 @@ class RiskEngine:
         cv2.imwrite(str(filepath), ev_frame)
         return str(filepath)
 
+    # =============================================
+    # FRAME-BY-FRAME PROCESSING
+    # =============================================
+
     def process_face_result(self, face_result, raw_frame):
         """Process face analysis results and flag evidence."""
         if not face_result.face_detected:
@@ -126,20 +203,25 @@ class RiskEngine:
         self.total_face_frames += 1
         now = time.time()
 
+        # Count gaze away frames
         if not face_result.gaze.is_looking_at_camera:
             self.gaze_away_frames += 1
 
+        # Count flat affect frames
         if face_result.emotion.expression_label == "flat_affect":
             self.flat_affect_frames += 1
 
-        # Flag extended gaze avoidance
+        # --- Flag gaze avoidance ---
         gaze_pct = (
             self.gaze_away_frames /
             max(self.total_face_frames, 1) * 100
         )
+
+        # Only flag if gaze away is HIGH (above baseline)
+        # and we have enough data (5+ seconds)
         if (
             gaze_pct > 50
-            and self.total_face_frames > 60
+            and self.total_face_frames > 150
             and (now - self._last_gaze_flag) > self.COOLDOWN
         ):
             z = compute_z_score(
@@ -147,40 +229,46 @@ class RiskEngine:
                 BASELINES["gaze_away_pct"]["mean"],
                 BASELINES["gaze_away_pct"]["std"]
             )
-            screenshot = self._save_screenshot(
-                raw_frame, "gaze",
-                f"Gaze away: {gaze_pct:.0f}% (z={z:+.1f})"
-            )
-            self.evidence.append(EvidenceItem(
-                timestamp=now,
-                session_time_str=self._session_time_str(),
-                category="gaze",
-                description=(
-                    f"Gaze avoidance at {gaze_pct:.0f}% "
-                    f"(baseline: "
-                    f"{BASELINES['gaze_away_pct']['mean']}"
-                    f"+-{BASELINES['gaze_away_pct']['std']}%). "
-                    f"Z-score: {z:+.1f} SD from neurotypical mean."
-                ),
-                confidence=min(abs(z) / 3.0, 0.99),
-                severity="high" if abs(z) > 2 else "medium",
-                screenshot_path=screenshot,
-                metric_name="gaze_away_pct",
-                metric_value=gaze_pct,
-                baseline_mean=BASELINES["gaze_away_pct"]["mean"],
-                baseline_std=BASELINES["gaze_away_pct"]["std"],
-                z_score=z
-            ))
-            self._last_gaze_flag = now
 
-        # Flag flat affect
+            # Only flag if z is POSITIVE (more gaze away than baseline)
+            if z > 1.0:
+                screenshot = self._save_screenshot(
+                    raw_frame, "gaze",
+                    f"Gaze away: {gaze_pct:.0f}% (z={z:+.1f})"
+                )
+                self.evidence.append(EvidenceItem(
+                    timestamp=now,
+                    session_time_str=self._session_time_str(),
+                    category="gaze",
+                    description=(
+                        f"Gaze avoidance at {gaze_pct:.0f}% "
+                        f"(baseline: "
+                        f"{BASELINES['gaze_away_pct']['mean']}"
+                        f"+-{BASELINES['gaze_away_pct']['std']}%). "
+                        f"Z-score: {z:+.1f} SD above neurotypical mean. "
+                        f"Elevated gaze avoidance per DSM-5-TR A.2."
+                    ),
+                    confidence=min(z / 3.0, 0.99),
+                    severity="high" if z > 2 else "medium",
+                    screenshot_path=screenshot,
+                    metric_name="gaze_away_pct",
+                    metric_value=gaze_pct,
+                    baseline_mean=BASELINES["gaze_away_pct"]["mean"],
+                    baseline_std=BASELINES["gaze_away_pct"]["std"],
+                    z_score=z
+                ))
+                self._last_gaze_flag = now
+
+        # --- Flag flat affect ---
         flat_pct = (
             self.flat_affect_frames /
             max(self.total_face_frames, 1) * 100
         )
+
+        # Require 5+ seconds of data before flagging flat affect
         if (
             flat_pct > 60
-            and self.total_face_frames > 60
+            and self.total_face_frames > 150
             and (now - self._last_expression_flag) > self.COOLDOWN
         ):
             screenshot = self._save_screenshot(
@@ -228,9 +316,9 @@ class RiskEngine:
                 description=(
                     f"Repetitive body rocking at "
                     f"{body_result.rocking_frequency:.1f} Hz. "
-                    f"Autocorrelation score: "
+                    f"Autocorrelation: "
                     f"{body_result.repetitive_motion_score:.2f}. "
-                    f"Classified under DSM-5-TR criterion B.1 "
+                    f"DSM-5-TR criterion B.1 "
                     f"(Stereotyped motor movements)."
                 ),
                 confidence=min(
@@ -257,10 +345,10 @@ class RiskEngine:
                 session_time_str=self._session_time_str(),
                 category="motor",
                 description=(
-                    f"Hand flapping behavior detected. "
+                    f"Hand flapping detected. "
                     f"Flap score: {body_result.hand_flap_score:.2f}. "
-                    f"Rapid oscillatory wrist movements with high "
-                    f"direction-reversal frequency. DSM-5-TR B.1."
+                    f"Rapid oscillatory wrist movements. "
+                    f"DSM-5-TR B.1."
                 ),
                 confidence=min(
                     body_result.hand_flap_score + 0.2, 0.99
@@ -272,6 +360,10 @@ class RiskEngine:
             ))
             self._last_motor_flag = now
 
+    # =============================================
+    # FINAL ASSESSMENT (ALL FIXES APPLIED)
+    # =============================================
+
     def compute_assessment(
         self,
         face_stats: dict,
@@ -282,19 +374,26 @@ class RiskEngine:
         Compute clinical assessment using standard deviations
         from published neurotypical baselines.
 
-        Accepts optional stimulus_metrics from StimulusEngine
-        and optional body_stats from BodyAnalyzer.
+        DIRECTIONALITY IS HANDLED CORRECTLY:
+        - Social Preference: LOW = concerning (higher_is_worse=False)
+        - Name-Call Latency: HIGH = concerning (higher_is_worse=True)
+        - Reciprocity: LOW = concerning (higher_is_worse=False)
+        - Gaze Avoidance: HIGH = concerning (higher_is_worse=True)
+        - Expression Variance: LOW = concerning (higher_is_worse=False)
+        - Blink Rate: BOTH extremes = concerning (bilateral)
         """
         assessment = RiskAssessment()
         deviations = []
 
-        # ===== 1. SOCIAL PREFERENCE (DSM-5 A.1) =====
+        # =================================================
+        # DOMAIN 1: SOCIAL VISUAL PREFERENCE (DSM-5 A.1)
+        # Lower social preference = more concerning
+        # =================================================
         if stimulus_metrics and stimulus_metrics.get("social_geometric"):
             sg = stimulus_metrics["social_geometric"]
             social_pct = sg.get("social_preference_pct", 50)
             bl = BASELINES["social_preference_pct"]
             z = compute_z_score(social_pct, bl["mean"], bl["std"])
-            z_concern = -z  # Lower social = more concerning
 
             deviations.append(ClinicalDeviation(
                 domain_name="Social Visual Preference",
@@ -307,17 +406,23 @@ class RiskEngine:
                     f"Subject preferred social stimuli "
                     f"{social_pct:.0f}% of the time "
                     f"(baseline: {bl['mean']}+-{bl['std']}%). "
-                    f"{'Below' if z < 0 else 'Above'} average by "
-                    f"{abs(z):.1f} SD."
+                    f"Deviation: {z:+.1f} SD. "
+                    f"{'Below average - reduced social interest.' if z < -1 else 'Within typical range.'}"
                 ),
+                # LOW social preference = concerning
                 clinical_significance=interpret_z_score(
-                    z_concern, higher_is_worse=True
+                    z, higher_is_worse=False
                 )
             ))
 
-        # ===== 2. NAME-CALL LATENCY (DSM-5 A.1) =====
+        # =================================================
+        # DOMAIN 2: NAME-CALL RESPONSE LATENCY (DSM-5 A.1)
+        # Higher latency = more concerning
+        # No response = highly atypical
+        # =================================================
         if stimulus_metrics and stimulus_metrics.get("name_call"):
             nc = stimulus_metrics["name_call"]
+
             if nc.get("responded"):
                 latency = nc["latency_ms"]
                 bl = BASELINES["name_call_latency_ms"]
@@ -331,76 +436,90 @@ class RiskEngine:
                     baseline_std=bl["std"],
                     z_score=z,
                     interpretation=(
-                        f"Response latency: {latency:.0f}ms "
+                        f"Head-turn response latency: "
+                        f"{latency:.0f}ms "
                         f"(baseline: {bl['mean']}+-{bl['std']}ms). "
-                        f"{'Delayed' if z > 0 else 'Typical'} by "
-                        f"{abs(z):.1f} SD."
+                        f"Deviation: {z:+.1f} SD. "
+                        f"{'Delayed response.' if z > 1 else 'Within typical range.'}"
                     ),
+                    # HIGH latency = concerning
                     clinical_significance=interpret_z_score(
                         z, higher_is_worse=True
                     )
                 ))
             else:
+                # No response at all
+                bl = BASELINES["name_call_latency_ms"]
                 deviations.append(ClinicalDeviation(
                     domain_name="Auditory Response Latency",
                     dsm5_code="A.1 (Response to social cues)",
                     metric_value=-1,
-                    baseline_mean=BASELINES["name_call_latency_ms"]["mean"],
-                    baseline_std=BASELINES["name_call_latency_ms"]["std"],
-                    z_score=3.5,
+                    baseline_mean=bl["mean"],
+                    baseline_std=bl["std"],
+                    z_score=3.5,  # Capped at 3.5 for no response
                     interpretation=(
                         "No head-turn response detected within "
-                        "10-second window after auditory stimulus. "
-                        "Absence of orienting response is a strong "
-                        "indicator per Nadig et al. 2007."
+                        "the observation window after auditory "
+                        "stimulus. Absence of orienting response "
+                        "is a strong indicator per Nadig et al. "
+                        "(2007). Note: environmental factors "
+                        "(audio volume, ambient noise) may affect "
+                        "this metric."
                     ),
                     clinical_significance="atypical"
                 ))
 
-        # ===== 3. EMOTIONAL RECIPROCITY (DSM-5 A.2) =====
+        # =================================================
+        # DOMAIN 3: EMOTIONAL RECIPROCITY (DSM-5 A.2)
+        # Lower smile-back rate = more concerning
+        # =================================================
         if stimulus_metrics and stimulus_metrics.get("reciprocity"):
             rc = stimulus_metrics["reciprocity"]
             smile_pct = rc.get("smile_reciprocity_pct", 0)
             bl = BASELINES["smile_reciprocity_pct"]
             z = compute_z_score(smile_pct, bl["mean"], bl["std"])
 
-            # Build rich interpretation using advanced metrics
-            interpretation_parts = [
+            # Build rich interpretation
+            interp_parts = [
                 f"Smile reciprocity rate: {smile_pct:.0f}% "
                 f"(baseline: {bl['mean']}+-{bl['std']}%). "
                 f"Deviation: {z:+.1f} SD."
             ]
 
-            # Add contextual analysis
+            # Add advanced metrics if available
             ctx_pct = rc.get("contextual_smile_pct", 0)
             if ctx_pct > 0:
-                interpretation_parts.append(
+                interp_parts.append(
                     f"Contextual smiling: {ctx_pct:.0f}% of "
                     f"total smiles occurred during prompt."
                 )
 
-            # Add congruence
             congruence = rc.get("emotional_congruence", 0)
-            interpretation_parts.append(
-                f"Emotional congruence: {congruence:.2f} "
-                f"({'High' if congruence > 0.6 else 'Low' if congruence < 0.3 else 'Moderate'} "
-                f"match between stimulus and response)."
-            )
-
-            # Add synchrony
-            synchrony = rc.get("affect_synchrony", 0)
-            if synchrony != 0:
-                interpretation_parts.append(
-                    f"Affect synchrony (correlation): "
-                    f"{synchrony:.2f}."
+            if congruence > 0:
+                interp_parts.append(
+                    f"Emotional congruence: {congruence:.2f} "
+                    f"({'High' if congruence > 0.6 else 'Low' if congruence < 0.3 else 'Moderate'} "
+                    f"match between stimulus and response)."
                 )
 
-            # Add diversity
+            synchrony = rc.get("affect_synchrony", 0)
+            if synchrony != 0:
+                interp_parts.append(
+                    f"Affect synchrony r={synchrony:.2f}."
+                )
+
             diversity = rc.get("expression_diversity", 0)
-            interpretation_parts.append(
-                f"Expression diversity: {diversity:.2f} "
-                f"({'Rich' if diversity > 0.5 else 'Limited'} range)."
-            )
+            if diversity > 0:
+                interp_parts.append(
+                    f"Expression diversity: {diversity:.2f} "
+                    f"({'Rich' if diversity > 0.5 else 'Limited'} range)."
+                )
+
+            peak = rc.get("peak_smile_score", 0)
+            if peak > 0:
+                interp_parts.append(
+                    f"Peak smile intensity: {peak:.2f}."
+                )
 
             deviations.append(ClinicalDeviation(
                 domain_name="Emotional Reciprocity",
@@ -409,16 +528,23 @@ class RiskEngine:
                 baseline_mean=bl["mean"],
                 baseline_std=bl["std"],
                 z_score=z,
-                interpretation=" ".join(interpretation_parts),
+                interpretation=" ".join(interp_parts),
+                # LOW reciprocity = concerning
                 clinical_significance=interpret_z_score(
-                    -z, higher_is_worse=True
+                    z, higher_is_worse=False
                 )
             ))
 
-        # ===== 4. GAZE AVOIDANCE (DSM-5 A.2) =====
+        # =================================================
+        # DOMAIN 4: GAZE AVOIDANCE (DSM-5 A.2)
+        # Higher gaze away percentage = more concerning
+        # Lower gaze away = good (typical or better)
+        # =================================================
         gaze_pct = face_stats.get("gaze_away_percentage", 0)
         bl = BASELINES["gaze_away_pct"]
         z = compute_z_score(gaze_pct, bl["mean"], bl["std"])
+
+        gaze_events = face_stats.get("gaze_events", [])
 
         deviations.append(ClinicalDeviation(
             domain_name="Gaze Avoidance",
@@ -431,15 +557,22 @@ class RiskEngine:
                 f"Gaze away: {gaze_pct:.1f}% of session "
                 f"(baseline: {bl['mean']}+-{bl['std']}%). "
                 f"Deviation: {z:+.1f} SD. "
-                f"Extended gaze events (>3s): "
-                f"{len(face_stats.get('gaze_events', []))}."
+                f"Extended gaze-away events (>3s): "
+                f"{len(gaze_events)}. "
+                f"{'Elevated avoidance pattern.' if z > 1 else ''}"
+                f"{'Below average - strong eye contact.' if z < -1 else ''}"
+                f"{'Within typical range.' if -1 <= z <= 1 else ''}"
             ),
+            # HIGH gaze away = concerning
             clinical_significance=interpret_z_score(
                 z, higher_is_worse=True
             )
         ))
 
-        # ===== 5. EXPRESSION VARIANCE (DSM-5 A.2) =====
+        # =================================================
+        # DOMAIN 5: FACIAL AFFECT RANGE (DSM-5 A.2)
+        # Lower expression variance = more concerning (flat)
+        # =================================================
         expr_var = face_stats.get("expression_variance", 0.045)
         bl = BASELINES["expression_variance"]
         z = compute_z_score(expr_var, bl["mean"], bl["std"])
@@ -454,18 +587,37 @@ class RiskEngine:
             interpretation=(
                 f"Expression variance: {expr_var:.4f} "
                 f"(baseline: {bl['mean']}+-{bl['std']}). "
-                f"{'Reduced' if z < 0 else 'Typical'} affect "
-                f"range, {abs(z):.1f} SD from mean."
+                f"Deviation: {z:+.1f} SD. "
+                f"{'Reduced affect range - possible flat affect.' if z < -1 else ''}"
+                f"{'Expressive - within or above typical range.' if z >= -1 else ''}"
             ),
+            # LOW variance = concerning (flat affect)
             clinical_significance=interpret_z_score(
-                -z, higher_is_worse=True
+                z, higher_is_worse=False
             )
         ))
 
-        # ===== 6. BLINK RATE (Physiological) =====
+        # =================================================
+        # DOMAIN 6: BLINK RATE (Physiological Biomarker)
+        # Both too high AND too low are concerning
+        # =================================================
         bpm = face_stats.get("blinks_per_minute", 17)
         bl = BASELINES["blinks_per_minute"]
         z = compute_z_score(bpm, bl["mean"], bl["std"])
+
+        blink_direction = ""
+        if z < -1:
+            blink_direction = (
+                "Hypo-blinking may indicate sustained "
+                "fixation or sensory processing differences."
+            )
+        elif z > 1:
+            blink_direction = (
+                "Hyper-blinking may indicate anxiety "
+                "or sensory sensitivity."
+            )
+        else:
+            blink_direction = "Within typical range."
 
         deviations.append(ClinicalDeviation(
             domain_name="Blink Rate",
@@ -477,21 +629,27 @@ class RiskEngine:
             interpretation=(
                 f"Blink rate: {bpm:.1f}/min "
                 f"(baseline: {bl['mean']}+-{bl['std']}/min). "
-                f"Deviation: {z:+.1f} SD."
+                f"Deviation: {z:+.1f} SD. "
+                f"{blink_direction}"
             ),
-            clinical_significance=interpret_z_score(
-                abs(z), higher_is_worse=True
-            )
+            # BOTH directions concerning (bilateral)
+            clinical_significance=interpret_z_score_bilateral(z)
         ))
 
-        # ===== 7. MOTOR BEHAVIOR (DSM-5 B.1) - Only if body data =====
-        if body_stats and body_stats.get("total_frames_analyzed", 0) > 30:
+        # =================================================
+        # DOMAIN 7: MOTOR BEHAVIOR (DSM-5 B.1)
+        # Only included if body data is available
+        # =================================================
+        if (
+            body_stats
+            and body_stats.get("total_frames_analyzed", 0) > 30
+        ):
             rock_pct = body_stats.get("rocking_percentage", 0)
             flap_pct = body_stats.get("flapping_percentage", 0)
-
-            # Combine motor score
             motor_combined = rock_pct * 0.6 + flap_pct * 0.4
-            # No published SD baseline for this, so use evidence-based flag
+
+            # No published SD baseline for webcam motor detection
+            # Use evidence-based categorical thresholds
             if motor_combined > 10:
                 motor_sig = "atypical"
                 motor_z = 2.5
@@ -513,25 +671,28 @@ class RiskEngine:
                     f"Rocking: {rock_pct:.1f}% of frames. "
                     f"Flapping: {flap_pct:.1f}% of frames. "
                     f"Combined motor index: {motor_combined:.1f}. "
-                    f"Repetitive motor behaviors assessed per "
-                    f"DSM-5-TR B.1 criteria."
+                    f"Assessed per DSM-5-TR B.1 criteria."
                 ),
                 clinical_significance=motor_sig
             ))
 
-        # Store deviations
+        # =================================================
+        # STORE DEVIATIONS
+        # =================================================
         assessment.deviations = deviations
         assessment.evidence_items = sorted(
             self.evidence, key=lambda e: e.timestamp
         )
 
-        # ===== DOMAIN SCORES (backward compat with report) =====
+        # Domain scores for backward compatibility
         for dev in deviations:
             assessment.domain_scores[dev.domain_name] = round(
                 abs(dev.z_score), 1
             )
 
-        # ===== RECOMMENDATIONS =====
+        # =================================================
+        # RECOMMENDATIONS
+        # =================================================
         atypical_domains = [
             d for d in deviations
             if d.clinical_significance == "atypical"
@@ -540,17 +701,23 @@ class RiskEngine:
             d for d in deviations
             if d.clinical_significance == "borderline"
         ]
+        typical_domains = [
+            d for d in deviations
+            if d.clinical_significance == "typical"
+        ]
 
+        # General recommendations based on severity
         if atypical_domains:
             domain_names = ", ".join(
                 d.domain_name for d in atypical_domains
             )
             assessment.recommendations.append(
-                f"Significant deviations detected in: "
+                f"Significant deviations (>2 SD) detected in: "
                 f"{domain_names}. "
                 f"Referral to developmental pediatrician "
                 f"recommended for comprehensive evaluation "
-                f"using ADOS-2."
+                f"using ADOS-2 or equivalent standardized "
+                f"instrument."
             )
 
         if borderline_domains:
@@ -558,87 +725,125 @@ class RiskEngine:
                 d.domain_name for d in borderline_domains
             )
             assessment.recommendations.append(
-                f"Borderline findings in {domain_names}. "
-                f"Recommend follow-up screening in 3-6 months."
+                f"Borderline findings (1-2 SD) in: "
+                f"{domain_names}. "
+                f"Recommend follow-up screening in 3-6 months "
+                f"to track developmental trajectory."
             )
 
         if not atypical_domains and not borderline_domains:
             assessment.recommendations.append(
                 "All measured behavioral domains fall within "
-                "neurotypical ranges. Continue routine "
-                "developmental monitoring per AAP guidelines."
+                "neurotypical ranges (<1 SD from baseline). "
+                "Continue routine developmental monitoring "
+                "per AAP guidelines."
             )
 
         # Stimulus-specific recommendations
         if stimulus_metrics:
+            # Social preference
             sg = stimulus_metrics.get("social_geometric", {})
-            if sg.get("social_preference_pct", 100) < 40:
+            social_pct = sg.get("social_preference_pct", 100)
+            if social_pct < 40:
                 assessment.recommendations.append(
-                    "Low social visual preference detected "
-                    f"({sg['social_preference_pct']:.0f}%). "
-                    "This pattern is consistent with findings "
-                    "from Jones & Klin (2013) and the EarliPoint "
-                    "diagnostic. Recommend formal eye-tracking "
-                    "assessment."
+                    f"Low social visual preference "
+                    f"({social_pct:.0f}%). "
+                    f"This pattern is consistent with findings "
+                    f"from Jones & Klin (2013) and the "
+                    f"EarliPoint diagnostic platform. "
+                    f"Recommend formal eye-tracking assessment."
                 )
 
+            # Name-call
             nc = stimulus_metrics.get("name_call", {})
             if not nc.get("responded", True):
                 assessment.recommendations.append(
                     "Subject did not orient to auditory stimulus. "
                     "Failure to respond to name is a key early "
-                    "indicator per Nadig et al. (2007). Recommend "
-                    "audiological screening to rule out hearing "
-                    "deficit, followed by developmental evaluation."
+                    "indicator per Nadig et al. (2007). "
+                    "Note: ensure adequate audio volume in test "
+                    "environment. Recommend audiological screening "
+                    "to rule out hearing deficit, followed by "
+                    "developmental evaluation if hearing is normal."
                 )
             elif nc.get("latency_ms", 0) > 1400:
                 assessment.recommendations.append(
                     f"Delayed auditory response "
-                    f"({nc['latency_ms']:.0f}ms). "
-                    "Typical latency is 500-1100ms. Consider "
-                    "attention and sensory processing evaluation."
+                    f"({nc['latency_ms']:.0f}ms, "
+                    f"typical: 500-1100ms). "
+                    f"Consider attention and sensory processing "
+                    f"evaluation."
                 )
 
+            # Reciprocity
             rc = stimulus_metrics.get("reciprocity", {})
-            if rc.get("smile_reciprocity_pct", 100) < 30:
+            smile_pct = rc.get("smile_reciprocity_pct", 100)
+            if smile_pct < 30:
                 assessment.recommendations.append(
-                    "Very low emotional reciprocity detected "
-                    f"({rc['smile_reciprocity_pct']:.0f}% "
-                    f"smile-back rate). "
-                    "Reduced social mirroring is a core feature "
-                    "per Trevisan et al. (2018). Recommend "
-                    "social-emotional development assessment."
+                    f"Very low emotional reciprocity "
+                    f"({smile_pct:.0f}% smile-back rate). "
+                    f"Reduced social mirroring is a core feature "
+                    f"per Trevisan et al. (2018) meta-analysis. "
+                    f"Recommend social-emotional development "
+                    f"assessment."
                 )
 
-        # ===== OVERALL RISK LEVEL =====
-        z_scores = [abs(d.z_score) for d in deviations]
-        if z_scores:
-            max_z = max(z_scores)
-            mean_z = float(np.mean(z_scores))
-            atypical_count = len(atypical_domains)
+            # Affect synchrony (if available)
+            synchrony = rc.get("affect_synchrony", 0)
+            if synchrony < -0.1:
+                assessment.recommendations.append(
+                    f"Negative affect synchrony detected "
+                    f"(r={synchrony:.2f}). Subject's expressions "
+                    f"inversely correlated with stimulus. "
+                    f"This may indicate atypical emotional "
+                    f"processing. Consider social cognition "
+                    f"evaluation."
+                )
 
+        # =================================================
+        # OVERALL RISK LEVEL
+        # =================================================
+        z_scores_for_concern = []
+        for d in deviations:
+            # Use the "concerning direction" z-score
+            if d.clinical_significance == "atypical":
+                z_scores_for_concern.append(abs(d.z_score))
+            elif d.clinical_significance == "borderline":
+                z_scores_for_concern.append(abs(d.z_score))
+            else:
+                z_scores_for_concern.append(0.0)
+
+        if z_scores_for_concern:
+            max_z = max(abs(d.z_score) for d in deviations)
+            mean_concern = float(np.mean(z_scores_for_concern))
+            n_atypical = len(atypical_domains)
+
+            # Map to 0-100 for backward compatibility
             assessment.overall_risk_score = round(
-                min(mean_z * 25, 100), 1
+                min(mean_concern * 25, 100), 1
             )
 
-            if atypical_count >= 2 or max_z >= 3.0:
+            # Risk level based on count and severity
+            if n_atypical >= 3 or max_z >= 3.5:
                 assessment.risk_level = "High"
-            elif atypical_count >= 1 or max_z >= 2.0:
+            elif n_atypical >= 1 or max_z >= 2.5:
                 assessment.risk_level = "Elevated"
-            elif any(
-                d.clinical_significance == "borderline"
-                for d in deviations
-            ):
+            elif len(borderline_domains) >= 2:
                 assessment.risk_level = "Borderline"
+            elif len(borderline_domains) >= 1:
+                assessment.risk_level = "Low-Borderline"
             else:
                 assessment.risk_level = "Typical"
 
-        # ===== SUMMARY =====
+        # =================================================
+        # SUMMARY
+        # =================================================
         duration = face_stats.get("session_duration_seconds", 0)
         n_atypical = len(atypical_domains)
         n_borderline = len(borderline_domains)
-        n_typical = len(deviations) - n_atypical - n_borderline
+        n_typical = len(typical_domains)
 
+        # Build domain summary
         parts = []
         if n_atypical > 0:
             parts.append(f"{n_atypical} atypical (>2 SD)")
@@ -646,7 +851,7 @@ class RiskEngine:
             parts.append(f"{n_borderline} borderline (1-2 SD)")
         if n_typical > 0:
             parts.append(f"{n_typical} typical (<1 SD)")
-        domain_summary = ", ".join(parts)
+        domain_summary = ", ".join(parts) if parts else "No data"
 
         assessment.summary = (
             f"Structured screening protocol analyzed "
@@ -657,25 +862,39 @@ class RiskEngine:
             f"were flagged during the session. "
         )
 
+        # Add specific atypical findings to summary
         if n_atypical > 0:
-            atypical_names = [
+            atypical_details = [
                 f"{d.domain_name} (z={d.z_score:+.1f})"
                 for d in atypical_domains
             ]
             assessment.summary += (
-                f"Significant deviations in: "
-                f"{'; '.join(atypical_names)}. "
+                f"Significant deviations identified in: "
+                f"{'; '.join(atypical_details)}. "
+            )
+
+        # Add note about directionality
+        if n_atypical == 0 and n_borderline == 0:
+            assessment.summary += (
+                "No clinically significant deviations were "
+                "detected. All behavioral metrics fall within "
+                "expected neurotypical ranges. "
             )
 
         assessment.summary += (
             "All metrics are compared against published "
-            "neurotypical baselines. This is a screening tool "
-            "only and does NOT constitute a clinical diagnosis. "
-            "Results must be reviewed by a qualified healthcare "
-            "professional."
+            "neurotypical baselines with proper directionality "
+            "(e.g., low gaze avoidance is typical, not atypical). "
+            "This is a screening tool only and does NOT "
+            "constitute a clinical diagnosis. Results must be "
+            "reviewed by a qualified healthcare professional."
         )
 
         return assessment
+
+    # =============================================
+    # RESET
+    # =============================================
 
     def reset(self):
         """Reset all evidence for a new session."""
@@ -688,6 +907,7 @@ class RiskEngine:
         self._last_expression_flag = 0.0
         self._last_motor_flag = 0.0
 
+        # Clear evidence screenshots
         for f in EVIDENCE_DIR.glob("evidence_*.jpg"):
             try:
                 f.unlink()

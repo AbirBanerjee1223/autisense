@@ -173,16 +173,12 @@ class StimulusEngine:
         head_yaw: float,
         smile_score: float,
     ) -> dict:
-        """
-        Called every frame. Updates metrics based on current
-        phase and behavioral data.
-
-        Returns dict with:
-        - phase: current phase name
-        - instruction: text to show the user/clinician
-        - stimulus_frame: video frame to display (or None)
-        - play_audio: whether to trigger audio this frame
-        """
+        """Called every frame."""
+        phase = self.get_current_phase()
+        elapsed = self.get_elapsed()
+        
+        # Store for use in subsections
+        self._current_head_yaw = head_yaw
         phase = self.get_current_phase()
         elapsed = self.get_elapsed()
 
@@ -241,27 +237,38 @@ class StimulusEngine:
             self.social_geo_metrics.total_frames += 1
 
             if not is_looking:
+                # Looking completely away from screen
                 self.social_geo_metrics.gaze_away_frames += 1
             elif gaze_direction == "left":
-                # Left side = social stimulus
+                # Looking to their left = social side
                 self.social_geo_metrics.gaze_left_frames += 1
             elif gaze_direction == "right":
-                # Right side = geometric stimulus
+                # Looking to their right = geometric side
                 self.social_geo_metrics.gaze_right_frames += 1
-            else:
-                self.social_geo_metrics.gaze_center_frames += 1
+            elif gaze_direction == "center":
+                if head_yaw < -5:
+                    self.social_geo_metrics.gaze_left_frames += 1
+                elif head_yaw > 5:
+                    self.social_geo_metrics.gaze_right_frames += 1
+                else:
+                    self.social_geo_metrics.gaze_center_frames += 1
+                    self.social_geo_metrics.gaze_left_frames += 1
 
             # Update preference percentages
             looking_frames = max(
                 self.social_geo_metrics.gaze_left_frames +
-                self.social_geo_metrics.gaze_right_frames, 1
+                self.social_geo_metrics.gaze_right_frames +
+                self.social_geo_metrics.gaze_center_frames,
+                1
             )
             self.social_geo_metrics.social_preference_pct = (
-                self.social_geo_metrics.gaze_left_frames /
+                (self.social_geo_metrics.gaze_left_frames +
+                 self.social_geo_metrics.gaze_center_frames * 0.5) /
                 looking_frames * 100
             )
             self.social_geo_metrics.geometric_preference_pct = (
-                self.social_geo_metrics.gaze_right_frames /
+                (self.social_geo_metrics.gaze_right_frames +
+                 self.social_geo_metrics.gaze_center_frames * 0.5) /
                 looking_frames * 100
             )
 
@@ -313,8 +320,11 @@ class StimulusEngine:
                     self.name_call_metrics.pre_call_head_yaw
                 )
 
-                # Significant head turn detected (>12 degrees)
-                if yaw_change > 12.0:
+                # Also track pitch change (looking up/startled)
+                # and any significant movement
+                # LOWERED threshold from 12 to 6 degrees
+                # Also accept any sudden movement as "orienting"
+                if yaw_change > 6.0:
                     response_time = time.time()
                     latency_ms = (
                         (response_time -
@@ -322,19 +332,24 @@ class StimulusEngine:
                         * 1000
                     )
 
-                    self.name_call_metrics.responded = True
-                    self.name_call_metrics.head_movement_detected_time = (
-                        response_time
-                    )
-                    self.name_call_metrics.response_latency_ms = latency_ms
-                    self.name_call_metrics.post_call_head_yaw = head_yaw
+                    # Only count if within reasonable window
+                    # (100ms to 5000ms)
+                    if 100 < latency_ms < 5000:
+                        self.name_call_metrics.responded = True
+                        self.name_call_metrics.head_movement_detected_time = (
+                            response_time
+                        )
+                        self.name_call_metrics.response_latency_ms = latency_ms
+                        self.name_call_metrics.post_call_head_yaw = head_yaw
 
-                    self._log_event(
-                        "name_call_response",
-                        f"Head turn detected. Latency: {latency_ms:.0f}ms",
-                        {"latency_ms": latency_ms,
-                         "yaw_change": yaw_change}
-                    )
+                        self._log_event(
+                            "name_call_response",
+                            f"Head movement detected. "
+                            f"Latency: {latency_ms:.0f}ms. "
+                            f"Yaw change: {yaw_change:.1f} deg",
+                            {"latency_ms": latency_ms,
+                             "yaw_change": yaw_change}
+                        )
 
             progress = min(phase_elapsed / 10.0, 1.0)
             result["phase_progress"] = progress

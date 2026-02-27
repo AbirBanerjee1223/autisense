@@ -6,6 +6,7 @@ import numpy as np
 import time
 import base64
 from pathlib import Path
+import streamlit.components.v1 as components
 
 from config import (
     LAPTOP_CAM_INDEX,
@@ -37,35 +38,88 @@ st.set_page_config(
 # =============================================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem; font-weight: 700;
-        background: linear-gradient(90deg, #2980b9, #8e44ad);
+    /* Friendly, Rounded Pediatric Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;700&family=Nunito:wght@400;600;800&display=swap');
+
+    /* Global Override */
+    html, body, [class*="css"] {
+        font-family: 'Nunito', sans-serif !important;
+        background-color: #F4F7F6 !important; /* Soft clinical mint-gray */
+    }
+    h1, h2, h3 { font-family: 'Quicksand', sans-serif !important; }
+    
+    /* Hide Streamlit Developer Artifacts */
+    #MainMenu, header, footer {visibility: hidden !important;}
+    
+    /* The Autisense Hero Header */
+    .hero-container {
+        text-align: center;
+        padding: 40px 20px;
+        background: linear-gradient(135deg, #ffffff 0%, #e0f2f1 100%);
+        border-radius: 30px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.04);
+        margin-bottom: 30px;
+        border: 2px solid white;
+    }
+    .hero-title {
+        font-size: 3.5rem; font-weight: 700;
+        background: linear-gradient(135deg, #5E35B1, #00ACC1);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-align: center; padding: 10px 0;
+        margin-bottom: 5px;
     }
+    .hero-subtitle { color: #546E7A; font-size: 1.3rem; font-weight: 600; }
+
+    /* Floating Metric Cards (Glassmorphism) */
+    .telemetry-grid {
+        display: flex; gap: 15px; flex-wrap: wrap; justify-content: space-between;
+    }
+    .telemetry-card {
+        flex: 1; min-width: 120px;
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(10px);
+        padding: 15px;
+        border-radius: 20px;
+        text-align: center;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.03);
+        border: 1px solid rgba(255,255,255,1);
+        transition: transform 0.2s;
+    }
+    .telemetry-card:hover { transform: translateY(-3px); }
+    .t-icon { font-size: 1.8rem; margin-bottom: 5px; }
+    .t-label { color: #78909C; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+    .t-value { color: #263238; font-size: 1.4rem; font-weight: 800; font-family: 'Quicksand', sans-serif; }
+
+    /* Animated Active Phase Banner */
     .phase-banner {
-        padding: 8px 16px; border-radius: 8px;
-        font-weight: bold; text-align: center;
-        margin-bottom: 10px;
+        padding: 18px 25px; border-radius: 24px;
+        font-weight: 700; text-align: center; font-size: 1.3rem;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+        border: 3px solid white;
+        transition: all 0.5s ease;
+        font-family: 'Quicksand', sans-serif;
     }
-    .phase-baseline { background: #ecf0f1; color: #2c3e50; }
-    .phase-social { background: #3498db; color: white; }
-    .phase-namecall { background: #e67e22; color: white; }
-    .phase-smile { background: #e91e63; color: white; }
-    .phase-cooldown { background: #95a5a6; color: white; }
-    .deviation-typical { 
-        background: #d5f5e3; border-left: 4px solid #2ecc71;
-        padding: 10px; margin: 5px 0; border-radius: 4px;
+    @keyframes pulse-ring { 0% {box-shadow: 0 0 0 0 rgba(0, 172, 193, 0.4);} 70% {box-shadow: 0 0 0 15px rgba(0, 172, 193, 0);} 100% {box-shadow: 0 0 0 0 rgba(0, 172, 193, 0);} }
+    
+    .phase-baseline { background: #FFFFFF; color: #455A64; }
+    .phase-social { background: #E1F5FE; color: #0277BD; animation: pulse-ring 2s infinite; border-color: #B3E5FC; }
+    .phase-namecall { background: #FFF3E0; color: #E65100; animation: pulse-ring 2s infinite; border-color: #FFE0B2; }
+    .phase-smile { background: #FCE4EC; color: #C2185b; animation: pulse-ring 2s infinite; border-color: #F8BBD0; }
+    .phase-cooldown { background: #E8F5E9; color: #2E7D32; }
+
+    /* Big Friendly Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #6C5CE7, #00CEC9) !important;
+        color: white !important;
+        border-radius: 30px !important;
+        padding: 15px 30px !important;
+        font-weight: 700 !important; font-size: 1.2rem !important;
+        border: none !important;
+        box-shadow: 0 8px 20px rgba(108, 92, 231, 0.3) !important;
+        transition: all 0.3s ease !important;
+        font-family: 'Quicksand', sans-serif !important;
     }
-    .deviation-borderline {
-        background: #fef9e7; border-left: 4px solid #f1c40f;
-        padding: 10px; margin: 5px 0; border-radius: 4px;
-    }
-    .deviation-atypical {
-        background: #fdedec; border-left: 4px solid #e74c3c;
-        padding: 10px; margin: 5px 0; border-radius: 4px;
-    }
+    .stButton > button:hover { transform: translateY(-3px) !important; box-shadow: 0 12px 25px rgba(108, 92, 231, 0.4) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,6 +140,7 @@ def init_state():
         'report_path': None,
         'chat_messages': [],
         'frame_count': 0,
+        'valid_face_frames': 0,
         'subject_id': 'Anonymous',
     }
     for k, v in defaults.items():
@@ -154,70 +209,35 @@ def render_sidebar():
 # SETUP PAGE
 # =============================================
 def render_setup():
-    st.markdown(
-        '<h1 class="main-header">🧠 NeuroLens AI</h1>',
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<p style='text-align:center; color:#7f8c8d;'>"
-        "Structured Clinical Stimulus Behavioral Screening"
-        "</p>",
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div class="hero-container">
+        <div class="hero-title">Autisense Early Intervention</div>
+        <div class="hero-subtitle">Engaging, child-friendly cognitive assessment platform.</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("### 👁️ Social Preference")
-        st.markdown(
-            "Split-screen test measures visual preference "
-            "for social vs. geometric stimuli "
-            "(EarliPoint method)."
-        )
-    with col2:
-        st.markdown("### 🔊 Name-Call Latency")
-        st.markdown(
-            "Audio stimulus measures orienting response "
-            "time in milliseconds "
-            "(SenseToKnow method)."
-        )
-    with col3:
-        st.markdown("### 😊 Emotional Reciprocity")
-        st.markdown(
-            "Smile prompt measures social mirroring "
-            "and affect synchrony."
-        )
-
-    st.markdown("---")
-
-    # Check stimuli exist
     from config import SOCIAL_GEOMETRIC_VIDEO, SMILE_PROMPT_VIDEO
-    stimuli_ready = (
-        Path(SOCIAL_GEOMETRIC_VIDEO).exists() and
-        Path(SMILE_PROMPT_VIDEO).exists() and
-        Path(NAME_CALL_AUDIO).exists()
-    )
+    stimuli_ready = Path(SOCIAL_GEOMETRIC_VIDEO).exists() and Path(NAME_CALL_AUDIO).exists()
 
     if not stimuli_ready:
-        st.warning(
-            "⚠️ Stimulus files not found. "
-            "Run `python stimulus_creator.py` first."
-        )
-        if st.button("Generate Stimuli Now"):
-            with st.spinner("Generating stimulus files..."):
-                from stimulus_creator import create_all_stimuli
-                create_all_stimuli()
-            st.success("✅ Stimuli generated!")
-            st.rerun()
+        st.warning("⚠️ Stimulus files missing. Please generate them first.")
         return
 
-    st.success("✅ All stimulus files ready")
+    # Beautiful instruction cards
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown('<div class="telemetry-card"><div class="t-icon">🧸</div><div class="t-value">Comfortable</div><div class="t-label">No wearables needed</div></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="telemetry-card"><div class="t-icon">⏱️</div><div class="t-value">90 Seconds</div><div class="t-label">Rapid screening</div></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="telemetry-card"><div class="t-icon">🛡️</div><div class="t-value">Private</div><div class="t-label">Edge-computed AI</div></div>', unsafe_allow_html=True)
 
-    if st.button(
-        "▶️ START SCREENING PROTOCOL",
-        type="primary",
-        use_container_width=True
-    ):
-        start_session()
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+    col_empty1, col_btn, col_empty2 = st.columns([1, 2, 1])
+    with col_btn:
+        if st.button("Begin Pediatric Assessment", type="primary", use_container_width=True):
+            start_session()
 
 
 def start_session():
@@ -280,15 +300,17 @@ def render_screening():
     st.markdown("---")
 
     # Two columns for camera and stimulus
-    cam_col, stim_col = st.columns(2)
-    with cam_col:
+    st.markdown("### Clinical Stimulus")
+    stimulus_placeholder = st.empty()
+    st.markdown("---")
+    
+    col_cam, col_data = st.columns([1, 2])
+    with col_cam:
         st.markdown("### 📹 Subject Camera")
         video_placeholder = st.empty()
+    with col_data:
+        st.markdown("### 📊 Live Session Data")
         metrics_placeholder = st.empty()
-
-    with stim_col:
-        st.markdown("### 🖥️ Stimulus Display")
-        stimulus_placeholder = st.empty()
         stim_info_placeholder = st.empty()
 
     # Audio (hidden)
@@ -326,6 +348,7 @@ def render_screening():
             st.session_state.frame_count += 1
 
             if face_result.face_detected:
+                st.session_state.valid_face_frames += 1
                 risk_eng.process_face_result(face_result, frame)
 
             # Extract behavioral data for stimulus engine
@@ -405,21 +428,50 @@ def render_screening():
 
             # Face metrics
             if face_result.face_detected:
-                contact = (
-                    "✅ Yes"
-                    if face_result.gaze.is_looking_at_camera
-                    else "❌ No"
-                )
-                metrics_placeholder.markdown(
-                    f"**Eye Contact:** {contact} | "
-                    f"**Gaze:** {gaze_dir} | "
-                    f"**Expr:** "
-                    f"{face_result.emotion.expression_label} | "
-                    f"**Blinks:** {face_az.blink_total} | "
-                    f"**Smile:** {smile_score:.2f}"
-                )
+                # Format text for UI
+                contact = "Yes" if face_result.gaze.is_looking_at_camera else "No"
+                expr = face_result.emotion.expression_label.replace("_", " ").title()
+                
+                hud_html = f"""
+                <div class="telemetry-grid">
+                    <div class="telemetry-card">
+                        <div class="t-icon">👁️</div>
+                        <div class="t-label">Eye Contact</div>
+                        <div class="t-value">{contact}</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-icon">👀</div>
+                        <div class="t-label">Gaze Dir</div>
+                        <div class="t-value">{gaze_dir.title()}</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-icon">🎭</div>
+                        <div class="t-label">Affect</div>
+                        <div class="t-value">{expr}</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-icon">💧</div>
+                        <div class="t-label">Blinks</div>
+                        <div class="t-value">{face_az.blink_total}</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-icon">😊</div>
+                        <div class="t-label">Smile</div>
+                        <div class="t-value">{smile_score:.2f}</div>
+                    </div>
+                </div>
+                """
+                metrics_placeholder.markdown(hud_html, unsafe_allow_html=True)
             else:
-                metrics_placeholder.warning("No face detected")
+                metrics_placeholder.markdown("""
+                <div class="telemetry-grid">
+                    <div class="telemetry-card" style="border-color: #ff7675; background: #ffeaa7;">
+                        <div class="t-icon">🔍</div>
+                        <div class="t-value" style="color: #d63031; font-size: 1.2rem;">Searching for face...</div>
+                        <div class="t-label" style="color: #d63031;">Please position subject in frame</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
             # Stimulus display
             stim_frame = stim_result.get("stimulus_frame")
@@ -492,11 +544,12 @@ def render_screening():
 
             # Audio trigger
             if stim_result.get("play_audio"):
-                audio_html = get_audio_html(NAME_CALL_AUDIO)
-                if audio_html:
-                    audio_placeholder.markdown(
-                        audio_html, unsafe_allow_html=True
-                    )
+                import winsound
+                try:
+                    # Plays instantly via motherboard, bypassing browser HTML latency
+                    winsound.PlaySound(NAME_CALL_AUDIO, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                except Exception as e:
+                    pass
 
             # Evidence log
             if risk_eng.evidence:
@@ -540,7 +593,28 @@ def render_screening():
 
 
 def stop_session():
-    """Compute results and transition to results page."""
+    """Compute results and transition to results page with clinical guardrails."""
+    elapsed = time.time() - st.session_state.session_start
+    
+    # 🛑 GUARDRAIL 1: Minimum Session Time
+    # Must complete at least 25 seconds (Baseline + part of Visual Test)
+    if elapsed < 25.0:
+        st.error("❌ Session ended too early. At least 25 seconds of data is required for clinical analysis.")
+        time.sleep(3) # Let the user read the error
+        st.session_state.app_state = 'setup'
+        st.rerun()
+        return
+        
+    # 🛑 GUARDRAIL 2: Face Presence Validation
+    # If the camera was on, but the child ran away (less than ~2 seconds of face data)
+    if st.session_state.get('valid_face_frames', 0) < 40:
+        st.error("❌ Insufficient face data. Please ensure the subject is clearly visible in the camera frame.")
+        time.sleep(3)
+        st.session_state.app_state = 'setup'
+        st.rerun()
+        return
+
+    # Valid session - Proceed with computation
     with st.spinner("Computing clinical assessment..."):
         face_stats = {}
         if st.session_state.face_analyzer:
@@ -781,82 +855,34 @@ def render_deviations_tab(assessment):
 
 def render_z_score_bar(z_score: float, label: str = ""):
     """
-    Render a visual z-score bar using Streamlit columns.
-    Shows position on a -3 to +3 SD scale.
+    Render a visual z-score bar safely using Streamlit Components.
     """
-    # Clamp z-score for display
     z_clamped = max(-3.0, min(3.0, z_score))
-
-    # Create a visual representation
-    # Map z-score to 0-100 percentage (center = 50)
     position_pct = ((z_clamped + 3.0) / 6.0) * 100
 
-    # Color based on significance
     z_abs = abs(z_score)
     if z_abs < 1.0:
         color = "#2ecc71"
-        bg_zone = "Typical"
     elif z_abs < 2.0:
         color = "#f1c40f"
-        bg_zone = "Borderline"
     else:
         color = "#e74c3c"
-        bg_zone = "Atypical"
 
-    # Build HTML bar
-    bar_html = f"""
-    <div style="
-        position: relative;
-        height: 30px;
-        background: linear-gradient(to right, 
-            #fdedec 0%, #fdedec 16.7%,
-            #fef9e7 16.7%, #fef9e7 33.3%,
-            #d5f5e3 33.3%, #d5f5e3 66.7%,
-            #fef9e7 66.7%, #fef9e7 83.3%,
-            #fdedec 83.3%, #fdedec 100%
-        );
-        border-radius: 4px;
-        margin: 5px 0;
-        border: 1px solid #ddd;
-    ">
-        <!-- Center line -->
-        <div style="
-            position: absolute; left: 50%; top: 0;
-            width: 2px; height: 100%;
-            background: #888;
-        "></div>
-        
-        <!-- SD markers -->
-        <div style="position:absolute; left:16.7%; top:0; width:1px; height:100%; background:#ccc;"></div>
-        <div style="position:absolute; left:33.3%; top:0; width:1px; height:100%; background:#ccc;"></div>
-        <div style="position:absolute; left:66.7%; top:0; width:1px; height:100%; background:#ccc;"></div>
-        <div style="position:absolute; left:83.3%; top:0; width:1px; height:100%; background:#ccc;"></div>
-        
-        <!-- Marker -->
-        <div style="
-            position: absolute;
-            left: {position_pct}%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            width: 18px; height: 18px;
-            background: {color};
-            border-radius: 50%;
-            border: 2px solid white;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        "></div>
-        
-        <!-- Labels -->
-        <div style="position:absolute; left:2px; bottom:-16px; font-size:10px; color:#999;">-3σ</div>
-        <div style="position:absolute; left:16%; bottom:-16px; font-size:10px; color:#999;">-2σ</div>
-        <div style="position:absolute; left:32%; bottom:-16px; font-size:10px; color:#999;">-1σ</div>
-        <div style="position:absolute; left:49%; bottom:-16px; font-size:10px; color:#999;">0</div>
-        <div style="position:absolute; left:65%; bottom:-16px; font-size:10px; color:#999;">+1σ</div>
-        <div style="position:absolute; left:82%; bottom:-16px; font-size:10px; color:#999;">+2σ</div>
-        <div style="position:absolute; right:2px; bottom:-16px; font-size:10px; color:#999;">+3σ</div>
+    # Use components.html instead of st.markdown(unsafe_allow_html=True)
+    html_code = f"""
+    <div style="font-family: sans-serif; position: relative; height: 30px; 
+                background: linear-gradient(to right, #fdedec 16%, #fef9e7 33%, #d5f5e3 66%, #fef9e7 83%, #fdedec 100%);
+                border-radius: 4px; border: 1px solid #ccc; margin-top:10px;">
+        <div style="position:absolute; left:50%; top:0; width:2px; height:100%; background:#888;"></div>
+        <div style="position: absolute; left: {position_pct}%; top: 50%; transform: translate(-50%, -50%); 
+                    width: 16px; height: 16px; background: {color}; border-radius: 50%; border: 2px solid white; 
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>
+        <div style="position:absolute; left:2px; bottom:-20px; font-size:12px; color:#666;">-3 SD</div>
+        <div style="position:absolute; left:48%; bottom:-20px; font-size:12px; color:#666;">0</div>
+        <div style="position:absolute; right:2px; bottom:-20px; font-size:12px; color:#666;">+3 SD</div>
     </div>
-    <div style="height: 20px;"></div>
     """
-    st.markdown(bar_html, unsafe_allow_html=True)
+    components.html(html_code, height=65)
 
 
 def render_evidence_tab(assessment):

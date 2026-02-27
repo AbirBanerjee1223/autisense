@@ -241,15 +241,15 @@ class StimulusEngine:
                 self.social_geo_metrics.gaze_away_frames += 1
             elif gaze_direction == "left":
                 # Looking to their left = social side
-                self.social_geo_metrics.gaze_left_frames += 1
+                self.social_geo_metrics.gaze_right_frames += 1
             elif gaze_direction == "right":
                 # Looking to their right = geometric side
-                self.social_geo_metrics.gaze_right_frames += 1
+                self.social_geo_metrics.gaze_left_frames += 1
             elif gaze_direction == "center":
                 if head_yaw < -5:
-                    self.social_geo_metrics.gaze_left_frames += 1
-                elif head_yaw > 5:
                     self.social_geo_metrics.gaze_right_frames += 1
+                elif head_yaw > 5:
+                    self.social_geo_metrics.gaze_left_frames += 1
                 else:
                     self.social_geo_metrics.gaze_center_frames += 1
                     self.social_geo_metrics.gaze_left_frames += 1
@@ -315,41 +315,37 @@ class StimulusEngine:
                 self._name_call_monitoring
                 and not self.name_call_metrics.responded
             ):
-                yaw_change = abs(
-                    head_yaw -
-                    self.name_call_metrics.pre_call_head_yaw
-                )
-
-                # Also track pitch change (looking up/startled)
-                # and any significant movement
-                # LOWERED threshold from 12 to 6 degrees
-                # Also accept any sudden movement as "orienting"
-                if yaw_change > 6.0:
-                    response_time = time.time()
-                    latency_ms = (
-                        (response_time -
-                         self.name_call_metrics.audio_played_time)
-                        * 1000
+                # AUDIO OFFSET FIX: Ignore the first 3 seconds of silence
+                actual_audio_start = self.name_call_metrics.audio_played_time + 3.0
+                
+                if time.time() >= actual_audio_start:
+                    yaw_change = abs(
+                        head_yaw -
+                        self.name_call_metrics.pre_call_head_yaw
                     )
 
-                    # Only count if within reasonable window
-                    # (100ms to 5000ms)
-                    if 100 < latency_ms < 5000:
-                        self.name_call_metrics.responded = True
-                        self.name_call_metrics.head_movement_detected_time = (
-                            response_time
-                        )
-                        self.name_call_metrics.response_latency_ms = latency_ms
-                        self.name_call_metrics.post_call_head_yaw = head_yaw
+                    # LOWERED threshold from 12 to 6 degrees
+                    if yaw_change > 6.0:
+                        response_time = time.time()
+                        
+                        # Calculate latency from when the voice ACTUALLY spoke
+                        latency_ms = (response_time - actual_audio_start) * 1000
 
-                        self._log_event(
-                            "name_call_response",
-                            f"Head movement detected. "
-                            f"Latency: {latency_ms:.0f}ms. "
-                            f"Yaw change: {yaw_change:.1f} deg",
-                            {"latency_ms": latency_ms,
-                             "yaw_change": yaw_change}
-                        )
+                        # Only count if within reasonable window (100ms to 5000ms)
+                        if 100 < latency_ms < 5000:
+                            self.name_call_metrics.responded = True
+                            self.name_call_metrics.head_movement_detected_time = response_time
+                            self.name_call_metrics.response_latency_ms = latency_ms
+                            self.name_call_metrics.post_call_head_yaw = head_yaw
+
+                            self._log_event(
+                                "name_call_response",
+                                f"Head movement detected. "
+                                f"Latency: {latency_ms:.0f}ms. "
+                                f"Yaw change: {yaw_change:.1f} deg",
+                                {"latency_ms": latency_ms,
+                                 "yaw_change": yaw_change}
+                            )
 
             progress = min(phase_elapsed / 10.0, 1.0)
             result["phase_progress"] = progress

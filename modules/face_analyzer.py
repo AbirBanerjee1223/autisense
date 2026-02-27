@@ -119,7 +119,7 @@ class FaceAnalyzer:
         self.blink_total = 0
         self.left_eye_closed_prev = False
         self.right_eye_closed_prev = False
-        self.BLINK_THRESHOLD = 0.5  # Blendshape value
+        self.BLINK_THRESHOLD = 0.35  # Blendshape value
 
         # Gaze tracking
         self.gaze_away_start: Optional[float] = None
@@ -221,19 +221,18 @@ class FaceAnalyzer:
         landmarks: np.ndarray,
         img_w: int,
         img_h: int,
-        head_yaw: float,   # <-- ADDED PARAMETER
-        head_pitch: float  # <-- ADDED PARAMETER
+        head_yaw: float,
+        head_pitch: float
     ) -> Tuple[str, bool]:
         """
         Determine gaze using Head Pose as the primary anchor, 
-        falling back to iris tracking for micro-movements.
+        with inverted X-axis mapping to account for cv2.flip(frame, 1).
         """
-        # 1. Primary Check: Head Pose (Bulletproof)
-        # If head is turned significantly, eye contact is broken.
+        # 1. Primary Check: Head Pose (X-AXIS INVERTED FOR MIRROR FIX)
         if head_yaw > 18.0:
-            return "right (head turned)", False
+            return "left (head turned)", False   # Flipped!
         elif head_yaw < -18.0:
-            return "left (head turned)", False
+            return "right (head turned)", False  # Flipped!
         elif head_pitch > 20.0:
             return "down (head lowered)", False
         elif head_pitch < -20.0:
@@ -241,7 +240,7 @@ class FaceAnalyzer:
 
         # 2. Secondary Check: Iris Position
         if len(landmarks) <= max(max(self.LEFT_IRIS), max(self.RIGHT_IRIS)):
-            return "center", True # Default to center if iris fails but head is straight
+            return "center", True
 
         left_iris_pts = landmarks[self.LEFT_IRIS]
         right_iris_pts = landmarks[self.RIGHT_IRIS]
@@ -254,18 +253,18 @@ class FaceAnalyzer:
         def iris_ratio(iris_center, eye_pts):
             eye_left_corner = eye_pts[0]
             eye_right_corner = eye_pts[3]
-            total_width = distance.euclidean(eye_left_corner[:2], eye_right_corner[:2])
+            total_width = np.linalg.norm(eye_left_corner[:2] - eye_right_corner[:2])
             if total_width == 0: return 0.5
-            iris_dist = distance.euclidean(eye_left_corner[:2], iris_center[:2])
+            iris_dist = np.linalg.norm(eye_left_corner[:2] - iris_center[:2])
             return iris_dist / total_width
 
         avg_ratio = (iris_ratio(left_iris_center, left_eye_pts) + iris_ratio(right_iris_center, right_eye_pts)) / 2
 
-        # Widened thresholds to account for webcam noise
+        # X-AXIS INVERTED FOR MIRROR FIX
         if avg_ratio < 0.28:
-            return "right (eyes)", False
+            return "left (eyes)", False   # Flipped!
         elif avg_ratio > 0.72:
-            return "left (eyes)", False
+            return "right (eyes)", False  # Flipped!
         
         return "center", True
 

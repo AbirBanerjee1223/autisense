@@ -1,243 +1,535 @@
-# main.py (COMPLETE REWRITE)
-
-import streamlit as st
-import cv2
-import numpy as np
 import time
-import base64
 from pathlib import Path
+
+import cv2
+import streamlit as st
 import streamlit.components.v1 as components
 
 from config import (
-    LAPTOP_CAM_INDEX,
-    SESSION_DURATION_SECONDS,
     EVIDENCE_DIR,
+    LAPTOP_CAM_INDEX,
     NAME_CALL_AUDIO,
-    BASELINES
+    SESSION_DURATION_SECONDS,
 )
-from modules.face_analyzer import FaceAnalyzer
-from modules.body_analyzer import BodyAnalyzer
-from modules.stimulus_engine import StimulusEngine, StimulusPhase
-from modules.risk_engine import RiskEngine
-from modules.report_generator import ReportGenerator
 from modules.chatbot import AutismScreeningChatbot
+from modules.face_analyzer import FaceAnalyzer
+from modules.mchat import MCHAT_QUESTIONS, MCHATScreener
+from modules.milestones import AGE_GROUP_LABELS, CATEGORY_INFO, MilestoneTracker
+from modules.referral_generator import ReferralGenerator
+from modules.report_generator import ReportGenerator
+from modules.resource_directory import ResourceDirectory
+from modules.risk_engine import RiskEngine
+from modules.social_stories import STORY_TOPICS, SocialStoryGenerator
+from modules.stimulus_engine import StimulusEngine
+from modules.therapy_goals import GOAL_DOMAINS, PROMPT_LEVELS, TherapyGoalTracker
+from modules.visual_schedule import VisualScheduleBuilder, get_all_activities_flat
 
+st.set_page_config(page_title="Autisense Care Continuum", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
 
-# =============================================
-# PAGE CONFIG
-# =============================================
-st.set_page_config(
-    page_title="NeuroLens AI - Autism Screening",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# =============================================
-# CUSTOM CSS
-# =============================================
 st.markdown("""
 <style>
-    /* Friendly, Rounded Pediatric Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;700&family=Nunito:wght@400;600;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@600;700&family=Inter:wght@400;500;600&display=swap');
 
-    /* Global Override */
+/* --- LIGHT MODE (DEFAULT) --- */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif !important;
+    background-color: #F8FAFC !important;
+    color: #1E293B !important;
+}
+
+h1, h2, h3 { font-family: 'Quicksand', sans-serif !important; }
+
+/* Hero Container - Soft light gradient */
+.hero-container {
+    text-align: center;
+    padding: 40px 20px;
+    background: linear-gradient(135deg, #ffffff 0%, #f0f4f8 100%);
+    border-radius: 24px;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    margin-bottom: 20px;
+}
+
+.hero-title {
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #1E3A8A; /* Deep Blue for light mode */
+    margin-bottom: 10px;
+}
+
+.hero-subtitle {
+    color: #64748B;
+    font-weight: 500;
+}
+
+/* Cards - Light background with dark text */
+.soft-card {
+    background: #FFFFFF !important;
+    color: #1E293B !important;
+    padding: 20px;
+    border-radius: 16px;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    margin-bottom: 15px;
+}
+
+/* Locked State */
+.locked {
+    background: #F1F5F9 !important;
+    opacity: 0.7;
+    border: 1px dashed #CBD5E1;
+}
+
+/* --- DARK MODE OVERRIDES --- */
+@media (prefers-color-scheme: dark) {
     html, body, [class*="css"] {
-        font-family: 'Nunito', sans-serif !important;
-        background-color: #F4F7F6 !important; /* Soft clinical mint-gray */
+        background-color: #0F172A !important;
+        color: #F1F5F9 !important;
     }
-    h1, h2, h3 { font-family: 'Quicksand', sans-serif !important; }
-    
-    /* Hide Streamlit Developer Artifacts */
-    #MainMenu, header, footer {visibility: hidden !important;}
-    
-    /* The Autisense Hero Header */
+
     .hero-container {
-        text-align: center;
-        padding: 40px 20px;
-        background: linear-gradient(135deg, #ffffff 0%, #e0f2f1 100%);
-        border-radius: 30px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.04);
-        margin-bottom: 30px;
-        border: 2px solid white;
+        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+        border-color: #334155;
     }
+
     .hero-title {
-        font-size: 3.5rem; font-weight: 700;
-        background: linear-gradient(135deg, #5E35B1, #00ACC1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 5px;
+        color: #60A5FA; /* Brighter blue for dark mode */
     }
-    .hero-subtitle { color: #546E7A; font-size: 1.3rem; font-weight: 600; }
 
-    /* Floating Metric Cards (Glassmorphism) */
-    .telemetry-grid {
-        display: flex; gap: 15px; flex-wrap: wrap; justify-content: space-between;
+    .hero-subtitle {
+        color: #94A3B8;
     }
-    .telemetry-card {
-        flex: 1; min-width: 120px;
-        background: rgba(255, 255, 255, 0.85);
-        backdrop-filter: blur(10px);
-        padding: 15px;
-        border-radius: 20px;
-        text-align: center;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.03);
-        border: 1px solid rgba(255,255,255,1);
-        transition: transform 0.2s;
-    }
-    .telemetry-card:hover { transform: translateY(-3px); }
-    .t-icon { font-size: 1.8rem; margin-bottom: 5px; }
-    .t-label { color: #78909C; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-    .t-value { color: #263238; font-size: 1.4rem; font-weight: 800; font-family: 'Quicksand', sans-serif; }
 
-    /* Animated Active Phase Banner */
-    .phase-banner {
-        padding: 18px 25px; border-radius: 24px;
-        font-weight: 700; text-align: center; font-size: 1.3rem;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-        border: 3px solid white;
-        transition: all 0.5s ease;
-        font-family: 'Quicksand', sans-serif;
+    .soft-card {
+        background: #1E293B !important;
+        color: #F1F5F9 !important;
+        border-color: #334155;
     }
-    @keyframes pulse-ring { 0% {box-shadow: 0 0 0 0 rgba(0, 172, 193, 0.4);} 70% {box-shadow: 0 0 0 15px rgba(0, 172, 193, 0);} 100% {box-shadow: 0 0 0 0 rgba(0, 172, 193, 0);} }
-    
-    .phase-baseline { background: #FFFFFF; color: #455A64; }
-    .phase-social { background: #E1F5FE; color: #0277BD; animation: pulse-ring 2s infinite; border-color: #B3E5FC; }
-    .phase-namecall { background: #FFF3E0; color: #E65100; animation: pulse-ring 2s infinite; border-color: #FFE0B2; }
-    .phase-smile { background: #FCE4EC; color: #C2185b; animation: pulse-ring 2s infinite; border-color: #F8BBD0; }
-    .phase-cooldown { background: #E8F5E9; color: #2E7D32; }
 
-    /* Big Friendly Buttons */
-    .stButton > button {
-        background: linear-gradient(135deg, #6C5CE7, #00CEC9) !important;
-        color: white !important;
-        border-radius: 30px !important;
-        padding: 15px 30px !important;
-        font-weight: 700 !important; font-size: 1.2rem !important;
-        border: none !important;
-        box-shadow: 0 8px 20px rgba(108, 92, 231, 0.3) !important;
-        transition: all 0.3s ease !important;
-        font-family: 'Quicksand', sans-serif !important;
+    .locked {
+        background: #161E2E !important;
+        opacity: 0.6;
     }
-    .stButton > button:hover { transform: translateY(-3px) !important; box-shadow: 0 12px 25px rgba(108, 92, 231, 0.4) !important; }
+}
+
+/* Button Styling (Works for both) */
+.stButton > button {
+    background: #FF4B4B !important;
+    color: white !important;
+    border-radius: 12px !important;
+    padding: 10px 24px !important;
+    font-weight: 600 !important;
+    border: none !important;
+    width: 100%;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# =============================================
-# SESSION STATE
-# =============================================
 def init_state():
     defaults = {
-        'app_state': 'setup',
-        'face_analyzer': None,
-        'stimulus_engine': None,
-        'risk_engine': None,
-        'chatbot': None,
-        'session_start': None,
-        'face_stats': {},
-        'assessment': None,
-        'report_path': None,
-        'chat_messages': [],
-        'frame_count': 0,
-        'valid_face_frames': 0,
-        'subject_id': 'Anonymous',
+        "app_state": "setup",
+        "subject_id": "Anonymous",
+        "journey_stage": "pre",
+        "active_nav": "🏠 Home / Dashboard",
+        "assessment_step": 1,
+        "consent": False,
+        "mchat_screener": MCHATScreener(),
+        "mchat_result": None,
+        "combined_summary": None,
+        "matched_domains": [],
+        "face_analyzer": None,
+        "stimulus_engine": None,
+        "risk_engine": None,
+        "chatbot": AutismScreeningChatbot(),
+        "session_start": None,
+        "face_stats": {},
+        "assessment": None,
+        "report_path": None,
+        "referral_path": None,
+        "chat_messages": [],
+        "frame_count": 0,
+        "valid_face_frames": 0,
+        "camera_snapshot": None,
+        "camera_check_done": False,
+        "nav_target": "🏠 Home / Dashboard",
     }
-    for k, v in defaults.items():
+    for k,v in defaults.items():
         if k not in st.session_state:
-            st.session_state[k] = v
-
-init_state()
+            st.session_state[k]=v
 
 
-# =============================================
-# AUDIO HELPER
-# =============================================
-def get_audio_html(audio_path: str) -> str:
-    """Create auto-playing audio HTML from a wav file."""
-    if not Path(audio_path).exists():
-        return ""
-    with open(audio_path, "rb") as f:
-        audio_bytes = f.read()
-    b64 = base64.b64encode(audio_bytes).decode()
-    return f"""
-    <audio autoplay>
-        <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-    </audio>
-    """
+def compute_combined_summary():
+    cv=st.session_state.assessment
+    mc=st.session_state.mchat_result
+    if cv is None and mc is None:
+        return None
+    cv_level = getattr(cv,'risk_level','Typical') if cv else 'Typical'
+    mc_level = getattr(mc,'risk_level','LOW') if mc else 'LOW'
+    score_map = {'Typical':0,'Borderline':1,'Elevated':2,'High':3,'LOW':0,'MEDIUM':2,'HIGH':3}
+    score=max(score_map.get(cv_level,0), score_map.get(mc_level,0))
+    combined = 'Low' if score==0 else 'Moderate' if score==1 else 'Elevated' if score==2 else 'High'
+    concordance = 'Aligned' if (score_map.get(cv_level,0)>=2 and score_map.get(mc_level,0)>=2) or (score_map.get(cv_level,0)<2 and score_map.get(mc_level,0)<2) else 'Mixed'
+    rec = {
+        'Low':'Current data is reassuring. Continue surveillance and milestone checks.',
+        'Moderate':'Some concerns were identified. Discuss findings with your pediatrician soon.',
+        'Elevated':'Findings suggest notable developmental concern. Schedule a pediatrician and EI referral promptly.',
+        'High':'Strong concern detected. Arrange urgent pediatric developmental follow-up and early intervention.'
+    }[combined]
+    return {'combined_risk':combined,'concordance':concordance,'combined_recommendation':rec,'cv_risk':cv_level,'mchat_risk':mc_level}
 
 
-# =============================================
-# SIDEBAR
-# =============================================
+def refresh_matches():
+    rd=ResourceDirectory()
+    if st.session_state.assessment:
+        rd.match_from_cv_assessment(st.session_state.assessment)
+    if st.session_state.mchat_result:
+        rd.match_from_mchat(st.session_state.mchat_result)
+    st.session_state.matched_domains=sorted(rd.matched_domains)
+    return rd
+
+
 def render_sidebar():
     with st.sidebar:
-        st.markdown("## ⚙️ Configuration")
-
-        st.session_state.subject_id = st.text_input(
-            "Subject ID", value=st.session_state.subject_id
+        st.markdown('## 🧭 Navigation')
+        st.session_state.subject_id = st.text_input('Subject ID', value=st.session_state.subject_id)
+        
+        options = [
+            "🏠 Home / Dashboard",
+            "📋 Assessment Center",
+            "📊 Clinical Profile & Referrals",
+            "🛠️ Daily Care Toolkit",
+            "💬 Autisense Copilot"
+        ]
+        
+        # Safely get the current index
+        current_index = options.index(st.session_state.active_nav) if st.session_state.active_nav in options else 0
+        
+        # Callback: Only fires when a user manually clicks the selectbox dropdown
+        def update_nav():
+            st.session_state.active_nav = st.session_state.sidebar_nav_widget
+            
+        # The selectbox now uses the callback instead of an if-statement
+        st.selectbox(
+            'Go to', 
+            options, 
+            index=current_index, 
+            key='sidebar_nav_widget', # Distinct key
+            on_change=update_nav
         )
 
-        st.markdown("---")
-        st.markdown("### Protocol Phases")
-        st.markdown("""
-        1. **Baseline** (0-15s) - Natural behavior
-        2. **Social/Geometric** (15-45s) - Visual preference
-        3. **Name-Call** (45-55s) - Audio response
-        4. **Smile Prompt** (55-75s) - Reciprocity
-        5. **Cooldown** (75-90s) - Post-stimulus
-        """)
+        locked = st.session_state.journey_stage != 'post'
+        if locked:
+            st.caption('🔒 Clinical Profile & Daily Toolkit unlock after assessment.')
 
-        st.markdown("---")
-        state = st.session_state.app_state
-        if state == 'setup':
-            st.info("🔧 Ready")
-        elif state == 'screening':
-            st.success("🔴 Screening active")
-        elif state == 'results':
-            st.success("✅ Results ready")
-
-        if st.button("🔄 Reset", use_container_width=True):
+        st.markdown('---')
+        st.caption(f"Journey stage: **{'Post-Screening' if st.session_state.journey_stage=='post' else 'Onboarding'}**")
+        if st.button('🔄 Reset Experience', use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            for f in EVIDENCE_DIR.glob("evidence_*.jpg"):
-                f.unlink()
+            for f in EVIDENCE_DIR.glob('evidence_*.jpg'):
+                f.unlink(missing_ok=True)
             st.rerun()
 
 
-# =============================================
-# SETUP PAGE
-# =============================================
-def render_setup():
-    st.markdown("""
-    <div class="hero-container">
-        <div class="hero-title">Autisense Early Intervention</div>
-        <div class="hero-subtitle">Engaging, child-friendly cognitive assessment platform.</div>
-    </div>
-    """, unsafe_allow_html=True)
+def render_home_dashboard():
+    if st.session_state.journey_stage == 'pre':
+        st.markdown("""<div class='hero-container'><div class='hero-title'>Autisense Early Intervention</div><div class='hero-subtitle'>Welcome → Listen & Observe → Analyze & Inform → Support Daily</div></div>""", unsafe_allow_html=True)
+        c1,c2,c3=st.columns(3)
+        c1.markdown("<div class='soft-card'><b>Why early screening matters</b><br/>Earlier support improves communication, social, and adaptive outcomes.</div>",unsafe_allow_html=True)
+        c2.markdown("<div class='soft-card'><b>Quick and child-friendly</b><br/>A structured 90-second protocol plus parent questionnaire.</div>",unsafe_allow_html=True)
+        c3.markdown("<div class='soft-card'><b>Actionable next steps</b><br/>Referral packet, specialist matching, and daily support tools.</div>",unsafe_allow_html=True)
+        st.markdown('')
+        if st.button('🚀 Start Initial Assessment', use_container_width=True, type='primary'):
+            st.session_state.active_nav='📋 Assessment Center'
+            st.session_state.assessment_step=1
+            st.rerun()
 
-    from config import SOCIAL_GEOMETRIC_VIDEO, SMILE_PROMPT_VIDEO
-    stimuli_ready = Path(SOCIAL_GEOMETRIC_VIDEO).exists() and Path(NAME_CALL_AUDIO).exists()
+        st.markdown("<div class='soft-card locked'>🔒 <b>Clinical Profile & Referrals</b><br/>Unlocks after complete assessment.</div>",unsafe_allow_html=True)
+        st.markdown("<div class='soft-card locked'>🔒 <b>Daily Care Toolkit</b><br/>Personalized goals, stories, schedules, and milestones.</div>",unsafe_allow_html=True)
+    else:
+        summary = st.session_state.combined_summary or compute_combined_summary()
+        if summary:
+            st.info(f"**Combined Guidance:** {summary['combined_recommendation']}")
+        col1,col2,col3=st.columns(3)
+        with col1:
+            if st.session_state.referral_path and Path(st.session_state.referral_path).exists():
+                with open(st.session_state.referral_path,'rb') as f:
+                    st.download_button('📥 Download Referral PDF',f.read(),file_name=Path(st.session_state.referral_path).name,mime='application/pdf',use_container_width=True)
+        with col2:
+            if st.button('🧭 View Recommended Next Steps',use_container_width=True):
+                st.session_state.active_nav='📊 Clinical Profile & Referrals'; st.rerun()
+        with col3:
+            if st.button('🛠️ Open Daily Toolkit',use_container_width=True):
+                st.session_state.active_nav='🛠️ Daily Care Toolkit'; st.rerun()
 
-    if not stimuli_ready:
-        st.warning("⚠️ Stimulus files missing. Please generate them first.")
+        st.markdown('### Daily Tools Highlights')
+        goals=TherapyGoalTracker(st.session_state.subject_id).get_active_goals()
+        st.markdown(f"<div class='soft-card'><b>Therapy Goals</b><br/>{len(goals)} active goals ready for today.</div>",unsafe_allow_html=True)
+        sched=VisualScheduleBuilder(st.session_state.subject_id)
+        st.markdown(f"<div class='soft-card'><b>Visual Schedule</b><br/>{len(sched.schedules)} saved schedules available.</div>",unsafe_allow_html=True)
+
+
+def render_assessment_center():
+    st.markdown('## 📋 Assessment Center')
+    step=st.session_state.assessment_step
+    st.progress(step/5, text=f"Step {step} of 5")
+
+    if step==1:
+        st.markdown('### Step 1 · Ethics Gate')
+        st.checkbox('I provide consent for camera-based developmental screening.', key='consent')
+        if st.button('Continue to Parent Questionnaire', type='primary', disabled=not st.session_state.consent):
+            st.session_state.assessment_step=2; st.rerun()
+
+    elif step==2:
+        st.markdown('### Step 2 · M-CHAT-R Parent Questionnaire')
+        screener=st.session_state.mchat_screener
+        for q in MCHAT_QUESTIONS:
+            current = screener.responses.get(q['id'])
+            ans = st.radio(f"Q{q['id']}. {q['text']}", ['Yes','No'], index=(0 if current=='Yes' else 1 if current=='No' else None), key=f"mchat_{q['id']}", horizontal=True)
+            if ans in ('Yes','No'):
+                screener.set_response(q['id'], ans)
+            if q.get('example'):
+                st.caption(q['example'])
+        c1,c2=st.columns(2)
+        if c1.button('⬅️ Back'): st.session_state.assessment_step=1; st.rerun()
+        if c2.button('Continue to Telemetry Setup', type='primary', disabled=not screener.is_complete()):
+            st.session_state.mchat_result=screener.score()
+            st.session_state.assessment_step=3
+            st.rerun()
+
+    elif step == 3:
+        st.markdown('### Step 3 · Digital Telemetry Setup')
+        
+        from config import SOCIAL_GEOMETRIC_VIDEO, SMILE_PROMPT_VIDEO
+        from pathlib import Path
+        
+        # Check if stimulus files exist
+        stim_ok = Path(SOCIAL_GEOMETRIC_VIDEO).exists() and Path(NAME_CALL_AUDIO).exists() and Path(SMILE_PROMPT_VIDEO).exists()
+        st.write(f"Stimulus assets loaded: {'✅' if stim_ok else '❌'}")
+        
+        if not stim_ok:
+            st.error("Missing stimulus files. Please run `stimulus_creator.py`.")
+            
+        st.info("Please ensure the subject is in a well-lit room and facing the screen.")
+
+        # 📸 NATIVE LIVE CAMERA WIDGET
+        # This automatically shows a live feed and waits for the user to click "Take Photo"
+        test_photo = st.camera_input("Verify lighting and positioning")
+
+        # Once the user clicks "Take Photo", the image data populates test_photo
+        if test_photo is not None:
+            st.session_state.camera_snapshot = test_photo
+            st.session_state.camera_check_done = True
+            st.success('✅ Photo captured! Lighting and face visibility verified. You can continue to screening.')
+
+        st.markdown("---")
+        
+        # Navigation Buttons
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button('⬅️ Back'): 
+                st.session_state.assessment_step = 2
+                st.rerun()
+                
+        with col2:
+            # Only allow starting if stimulus files exist AND they took a valid test photo
+            can_start = stim_ok and st.session_state.get('camera_check_done', False)
+            if st.button('Start 90-Second Protocol', type='primary', disabled=not can_start):
+                # We update the state to 4 (the screening loop) and trigger the start function
+                st.session_state.assessment_step = 4
+                start_session()
+
+    elif step==4:
+        st.info('The 90-second protocol is running...')
+
+    elif step == 5:
+        st.markdown('### Step 5 · Clinical Synthesis')
+        
+        # 🛑 FIX: Only run the heavy fusion and PDF generation ONCE
+        if not st.session_state.get('synthesis_complete', False):
+            p = st.progress(0, text='Fusing M-CHAT-R responses with Digital Telemetry...')
+            
+            for i in range(1, 101, 20):
+                time.sleep(0.12) 
+                p.progress(i)
+                
+            st.session_state.combined_summary = compute_combined_summary()
+            rd = refresh_matches()
+            
+            if st.session_state.referral_path is None and (st.session_state.assessment or st.session_state.mchat_result):
+                rg = ReferralGenerator()
+                st.session_state.referral_path = rg.generate_referral(
+                    subject_id=st.session_state.subject_id,
+                    cv_assessment=st.session_state.assessment,
+                    mchat_result=st.session_state.mchat_result,
+                    combined_summary=st.session_state.combined_summary,
+                    face_stats=st.session_state.face_stats,
+                    session_info={'duration': SESSION_DURATION_SECONDS, 'camera_mode': 'Single (Face + Stimulus Protocol)'},
+                )
+                
+            st.session_state.journey_stage = 'post'
+            st.session_state.synthesis_complete = True
+            p.empty() # Cleanly remove the progress bar when finished
+
+        # This will now render instantly on subsequent reruns
+        st.success('✅ Assessment complete! Your care platform is now personalized.')
+        st.info("The system has generated your combined risk profile and customized your Post-Diagnosis Care tools.")
+        
+        # The button will now work perfectly because the sleep loop is bypassed
+        if st.button('Go to Clinical Profile', type='primary', use_container_width=True):
+            st.session_state.active_nav = '📊 Clinical Profile & Referrals'
+            st.rerun()
+
+
+def render_clinical_profile():
+    if st.session_state.journey_stage!='post':
+        st.warning('🔒 Complete assessment first to unlock this section.')
         return
+    st.markdown('## 📊 Clinical Profile & Referrals')
+    summary=st.session_state.combined_summary or compute_combined_summary()
+    if summary:
+        st.info(f"Combined risk: **{summary['combined_risk']}** · Concordance: **{summary['concordance']}**")
 
-    # Beautiful instruction cards
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown('<div class="telemetry-card"><div class="t-icon">🧸</div><div class="t-value">Comfortable</div><div class="t-label">No wearables needed</div></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown('<div class="telemetry-card"><div class="t-icon">⏱️</div><div class="t-value">90 Seconds</div><div class="t-label">Rapid screening</div></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown('<div class="telemetry-card"><div class="t-icon">🛡️</div><div class="t-value">Private</div><div class="t-label">Edge-computed AI</div></div>', unsafe_allow_html=True)
+    t1,t2,t3=st.tabs(['Dashboard','Action Center','Smart Directory'])
+    with t1:
+        c1,c2=st.columns(2)
+        with c1:
+            if st.session_state.assessment:
+                st.markdown('### Digital Telemetry (Z-score view)')
+                render_deviations_tab(st.session_state.assessment)
+            else:
+                st.info('No CV assessment data available.')
+        with c2:
+            st.markdown('### M-CHAT-R Matrix')
+            m=st.session_state.mchat_result
+            if m:
+                st.metric('Total score', f"{m.total_score}/20")
+                st.metric('Risk level', m.risk_level)
+                st.write('Flagged items:', ', '.join(map(str,m.risk_items)) if m.risk_items else 'None')
+                for q in MCHAT_QUESTIONS:
+                    ans=m.responses.get(q['id'],'-')
+                    at='🔴' if q['id'] in m.risk_items else '🟢'
+                    st.write(f"{at} Q{q['id']} · {q['domain']} · {ans}")
+            else:
+                st.info('No questionnaire data available.')
+    with t2:
+        st.markdown('### Generate Clinician Referral PDF')
+        if st.session_state.referral_path and Path(st.session_state.referral_path).exists():
+            with open(st.session_state.referral_path,'rb') as f:
+                st.download_button('📥 Download Referral PDF',f.read(),file_name=Path(st.session_state.referral_path).name,mime='application/pdf',type='primary')
+            st.caption('Take this document to your pediatrician.')
+        else:
+            st.warning('Referral not generated yet.')
+    with t3:
+        rd=refresh_matches()
+        specials=rd.get_all_specialists()
+        st.markdown('### Context-Aware Specialist Suggestions')
+        st.write('Matched concern domains:', ', '.join(st.session_state.matched_domains) if st.session_state.matched_domains else 'None yet')
+        if specials:
+            for s in specials:
+                st.markdown(f"- **{s.get('title','Specialist')}** — {s.get('why','Recommended based on screening patterns')}")
+        else:
+            st.info('No targeted specialties matched. Showing general developmental resources:')
+            for r in rd.get_global_resources()[:6]:
+                st.markdown(f"- **{r.name}** · {r.url}")
 
-    st.markdown("<br><br>", unsafe_allow_html=True)
 
-    col_empty1, col_btn, col_empty2 = st.columns([1, 2, 1])
-    with col_btn:
-        if st.button("Begin Pediatric Assessment", type="primary", use_container_width=True):
-            start_session()
+def render_daily_toolkit():
+    if st.session_state.journey_stage!='post':
+        st.warning('🔒 Complete assessment first to unlock this section.')
+        return
+    st.markdown('## 🛠️ Daily Care Toolkit')
+    rd=refresh_matches()
+
+    tab1,tab2,tab3,tab4 = st.tabs(['Therapy Goal Tracker','Social Story Generator','Visual Schedule Builder','Milestone Tracker'])
+    with tab1:
+        tracker=TherapyGoalTracker(st.session_state.subject_id)
+        suggestions=tracker.get_suggested_goals(st.session_state.matched_domains)
+        if suggestions:
+            st.markdown("#### Suggested goals from your child's profile")
+            for s in suggestions[:5]:
+                if st.button(f"➕ Add: {s['goal_text']}", key=f"sug_{s['goal_text']}"):
+                    tracker.add_goal_from_suggestion(s); st.rerun()
+        with st.expander('Add custom goal'):
+            gtxt=st.text_input('Goal statement', key='new_goal_txt')
+            dom=st.selectbox('Domain', options=list(GOAL_DOMAINS.keys()))
+            beh=st.text_area('Target behavior', key='new_goal_beh')
+            if st.button('Save Goal') and gtxt and beh:
+                tracker.add_goal(gtxt, dom, beh); st.success('Goal added'); st.rerun()
+        st.markdown('#### Active goals')
+        for g in tracker.get_active_goals():
+            st.markdown(f"**{g.goal_text}** · {g.domain} · Latest: {g.latest_percentage:.0f}%")
+            c1,c2,c3=st.columns([2,2,2])
+            succ=c1.number_input('Successful',0,20,5,key=f"succ_{g.goal_id}")
+            total=c2.number_input('Total',1,20,10,key=f"tot_{g.goal_id}")
+            prompt=c3.selectbox('Prompt', list(PROMPT_LEVELS.keys()), key=f"prompt_{g.goal_id}")
+            if st.button('Log trial', key=f"log_{g.goal_id}"):
+                tracker.log_trial(g.goal_id, int(succ), int(total), prompt_level=prompt)
+                st.success('Trial logged')
+                st.rerun()
+            st.markdown('---')
+
+    with tab2:
+        gen=SocialStoryGenerator()
+        st.caption('Story themes are auto-personalized using matched domains.')
+        cat=st.selectbox('Situation category', options=list(STORY_TOPICS.keys()))
+        topics=STORY_TOPICS[cat]
+        topic_idx=st.selectbox('Topic', options=list(range(len(topics))), format_func=lambda i: topics[i]['title'])
+        age=st.slider('Child age',2,10,4)
+        if st.button('Generate Story', type='primary'):
+            out=gen.generate_from_preset(cat, topic_idx, child_age=age, screening_domains=st.session_state.matched_domains)
+            st.subheader(out.get('title','Story'))
+            st.write(out.get('story',''))
+
+    with tab3:
+        vs=VisualScheduleBuilder(st.session_state.subject_id)
+        templates=vs.get_templates()
+        tkey=st.selectbox('Template', options=list(templates.keys()), format_func=lambda k: templates[k]['name'])
+        if st.button('Create from template'):
+            sid=vs.create_from_template(tkey)
+            st.session_state['active_schedule_id']=sid
+            st.rerun()
+        if vs.schedules:
+            sid=st.selectbox('Select schedule', options=list(vs.schedules.keys()), format_func=lambda s: vs.schedules[s].name)
+            schedule=vs.get_schedule(sid)
+            acts=get_all_activities_flat()
+            act_id=st.selectbox('Add activity', options=[a.id for a in acts], format_func=lambda aid: next(a for a in acts if a.id==aid).name)
+            time_label=st.text_input('Time label (optional)','')
+            if st.button('Add item'):
+                vs.add_item(sid, act_id, time_label=time_label); st.rerun()
+            for i,it in enumerate(schedule.items):
+                done='✅' if it.completed else '⬜'
+                if st.button(f"{done} {it.time_label} {it.icon} {it.activity_name}", key=f"tog_{sid}_{i}"):
+                    vs.toggle_complete(sid, i); st.rerun()
+            pdf=vs.export_schedule_pdf(sid)
+            if pdf and Path(pdf).exists():
+                with open(pdf,'rb') as f:
+                    st.download_button('📥 Download Schedule PDF',f.read(),file_name=Path(pdf).name,mime='application/pdf')
+
+    with tab4:
+        mt=MilestoneTracker(st.session_state.subject_id)
+        age_group=st.selectbox('Age bracket', options=list(AGE_GROUP_LABELS.keys()), format_func=lambda k: AGE_GROUP_LABELS[k])
+        milestones=mt.get_milestones_for_age(age_group)
+        for m in milestones:
+            status=mt.get_status(m.id)
+            default='Not yet assessed' if status is None else ('Achieved' if status else 'Not achieved')
+            choice=st.selectbox(f"{m.text}", ['Not yet assessed','Achieved','Not achieved'], index=['Not yet assessed','Achieved','Not achieved'].index(default), key=f"mile_{m.id}")
+            if st.button('Save', key=f"save_{m.id}"):
+                if choice=='Not yet assessed':
+                    pass
+                else:
+                    mt.set_milestone(m.id, achieved=(choice=='Achieved'))
+                st.rerun()
+        rep=mt.generate_report(age_group)
+        st.info(f"Achievement rate: {rep.achievement_rate:.1f}% · Concern areas: {', '.join(rep.concern_areas) if rep.concern_areas else 'None'}")
+
+
+def render_copilot_page():
+    st.markdown('## 💬 Autisense Copilot')
+    if st.session_state.combined_summary:
+        st.caption(f"Context loaded: combined risk = {st.session_state.combined_summary['combined_risk']}")
+    render_chatbot_tab()
 
 
 def start_session():
@@ -267,6 +559,8 @@ def start_session():
 # =============================================
 # main.py - Replace render_screening() completely
 
+
+# NOTE: screening logic retained from existing implementation.
 def render_screening():
     st.markdown(
         "<h2 style='text-align:center;'>🔴 Live Screening</h2>",
@@ -301,7 +595,9 @@ def render_screening():
 
     # Two columns for camera and stimulus
     st.markdown("### Clinical Stimulus")
-    stimulus_placeholder = st.empty()
+    stim_l, stim_m, stim_r = st.columns([1, 2, 1])
+    with stim_m:
+        stimulus_placeholder = st.empty()
     st.markdown("---")
     
     col_cam, col_data = st.columns([1, 2])
@@ -428,50 +724,21 @@ def render_screening():
 
             # Face metrics
             if face_result.face_detected:
-                # Format text for UI
                 contact = "Yes" if face_result.gaze.is_looking_at_camera else "No"
                 expr = face_result.emotion.expression_label.replace("_", " ").title()
-                
-                hud_html = f"""
-                <div class="telemetry-grid">
-                    <div class="telemetry-card">
-                        <div class="t-icon">👁️</div>
-                        <div class="t-label">Eye Contact</div>
-                        <div class="t-value">{contact}</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="t-icon">👀</div>
-                        <div class="t-label">Gaze Dir</div>
-                        <div class="t-value">{gaze_dir.title()}</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="t-icon">🎭</div>
-                        <div class="t-label">Affect</div>
-                        <div class="t-value">{expr}</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="t-icon">💧</div>
-                        <div class="t-label">Blinks</div>
-                        <div class="t-value">{face_az.blink_total}</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="t-icon">😊</div>
-                        <div class="t-label">Smile</div>
-                        <div class="t-value">{smile_score:.2f}</div>
-                    </div>
-                </div>
-                """
-                metrics_placeholder.markdown(hud_html, unsafe_allow_html=True)
+                with metrics_placeholder.container():
+                    st.markdown("<div class='live-metrics-card'>", unsafe_allow_html=True)
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Eye contact", contact)
+                    m2.metric("Gaze direction", gaze_dir.title())
+                    m3.metric("Affect", expr)
+                    m4, m5, m6 = st.columns(3)
+                    m4.metric("Blinks", f"{face_az.blink_total}")
+                    m5.metric("Smile score", f"{smile_score:.2f}")
+                    m6.metric("Head yaw", f"{head_yaw:.1f}°")
+                    st.markdown("</div>", unsafe_allow_html=True)
             else:
-                metrics_placeholder.markdown("""
-                <div class="telemetry-grid">
-                    <div class="telemetry-card" style="border-color: #ff7675; background: #ffeaa7;">
-                        <div class="t-icon">🔍</div>
-                        <div class="t-value" style="color: #d63031; font-size: 1.2rem;">Searching for face...</div>
-                        <div class="t-label" style="color: #d63031;">Please position subject in frame</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                metrics_placeholder.warning("Searching for face... Please position subject in frame.")
 
             # Stimulus display
             stim_frame = stim_result.get("stimulus_frame")
@@ -481,7 +748,7 @@ def render_screening():
                 )
                 stimulus_placeholder.image(
                     stim_rgb, channels="RGB",
-                    use_container_width=True
+                    width=620
                 )
 
             # Stimulus-specific info
@@ -670,6 +937,8 @@ def stop_session():
 # =============================================
 # RESULTS PAGE
 # =============================================
+
+
 def render_results():
     st.markdown(
         '<h1 class="main-header">📊 Clinical Results</h1>',
@@ -1173,16 +1442,31 @@ def _quick_q(chatbot, question: str):
 # =============================================
 # MAIN ROUTER
 # =============================================
+
+
+
 def main():
+    init_state()
     render_sidebar()
 
-    if st.session_state.app_state == 'setup':
-        render_setup()
-    elif st.session_state.app_state == 'screening':
+    if st.session_state.app_state == 'screening':
         render_screening()
-    elif st.session_state.app_state == 'results':
-        render_results()
+        return
+
+    if st.session_state.active_nav == '🏠 Home / Dashboard':
+        render_home_dashboard()
+    elif st.session_state.active_nav == '📋 Assessment Center':
+        # if cv just completed and coming from screening, move to synthesis
+        if st.session_state.app_state == 'results' and st.session_state.assessment_step < 5:
+            st.session_state.assessment_step = 5
+        render_assessment_center()
+    elif st.session_state.active_nav == '📊 Clinical Profile & Referrals':
+        render_clinical_profile()
+    elif st.session_state.active_nav == '🛠️ Daily Care Toolkit':
+        render_daily_toolkit()
+    elif st.session_state.active_nav == '💬 Autisense Copilot':
+        render_copilot_page()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

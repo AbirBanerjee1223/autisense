@@ -1,7 +1,7 @@
 # modules/chatbot.py
 
 import google.generativeai as genai
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY_CHAT
 from typing import List, Dict, Optional
 
 
@@ -41,13 +41,13 @@ class AutismScreeningChatbot:
     def _configure(self):
         """Configure the Gemini API."""
         try:
-            if not GEMINI_API_KEY or GEMINI_API_KEY == "your-api-key-here":
+            if not GEMINI_API_KEY_CHAT or GEMINI_API_KEY_CHAT == "your-api-key-here":
                 print(
                     "[Chatbot] Warning: No Gemini API key configured"
                 )
                 return
 
-            genai.configure(api_key=GEMINI_API_KEY)
+            genai.configure(api_key=GEMINI_API_KEY_CHAT)
 
             self.model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash-lite',

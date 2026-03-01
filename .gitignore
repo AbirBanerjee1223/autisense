@@ -5,3 +5,6 @@ evidence/
 reports/
 *.pyc
 .streamlit/
+data/
+logs/
+evidence/

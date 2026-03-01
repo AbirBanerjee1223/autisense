@@ -125,7 +125,7 @@ PROMPT_LEVELS = {
     "independent": {
         "label": "Independent",
         "icon": "🌟",
-        "description": "No prompt needed — child performs skill independently",
+        "description": "No prompt needed - child performs skill independently",
         "level": 0,
     },
     "verbal": {
@@ -177,7 +177,7 @@ PHASE_INFO = {
         "label": "Maintenance",
         "icon": "✅",
         "color": "#2ecc71",
-        "description": "Skill mastered — monitoring to ensure retention",
+        "description": "Skill mastered - monitoring to ensure retention",
     },
     "generalization": {
         "label": "Generalization",

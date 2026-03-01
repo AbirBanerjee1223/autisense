@@ -30,11 +30,14 @@ NAME_CALL_AUDIO = str(STIMULI_DIR / "name_call.wav")
 LAPTOP_CAM_INDEX = 0
 
 # --- Gemini API ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if not GEMINI_API_KEY:
-    print("⚠️  GEMINI_API_KEY not found. Chatbot uses fallback.")
+GEMINI_API_KEY_CHAT = os.getenv("GEMINI_API_KEY_CHAT", "")
+GEMINI_API_KEY_STORY = os.getenv("GEMINI_API_KEY_STORY", "")
+GEMINI_API_KEY_THERAPY = os.getenv("GEMINI_API_KEY_THERAPY", "")
+
+if not any([GEMINI_API_KEY_CHAT, GEMINI_API_KEY_STORY, GEMINI_API_KEY_THERAPY]):
+    print("⚠️  No Gemini API keys found. App uses fallbacks.")
 else:
-    print(f"✅ Gemini key loaded (...{GEMINI_API_KEY[-4:]})")
+    print("✅ Multi-Key Gemini API System loaded successfully.")
 
 # --- Clinical Baselines (From Published Literature) ---
 # These are neurotypical baseline values used to compute

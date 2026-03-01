@@ -135,7 +135,7 @@ GLOBAL_RESOURCES = [
         resource_type="directory",
     ),
     Resource(
-        name="CDC — Learn the Signs. Act Early.",
+        name="CDC - Learn the Signs. Act Early.",
         url="https://www.cdc.gov/actearly/",
         description="Free milestone checklists, tips, and parent resources from the Centers for Disease Control.",
         resource_type="guide",
@@ -172,7 +172,7 @@ GLOBAL_RESOURCES = [
         phone="1-800-328-8476",
     ),
     Resource(
-        name="Early Intervention (Part C) — IDEA",
+        name="Early Intervention (Part C) - IDEA",
         url="https://www.cdc.gov/ncbddd/actearly/parents/states.html",
         description="Find your state's Early Intervention program. Free evaluation for children 0-3 years.",
         resource_type="directory",
@@ -199,7 +199,7 @@ INTERVENTIONS_DB = {
             "reduce challenging behaviors. The most researched intervention for ASD."
         ),
         evidence_level="strong",
-        age_range="18 months — adult",
+        age_range="18 months - adult",
         typical_provider="BCBA (Board Certified Behavior Analyst)",
         reference="National Autism Center, National Standards Project Phase 2 (2015)",
     ),
@@ -223,7 +223,7 @@ INTERVENTIONS_DB = {
             "pictures for desired items/activities. Builds toward spontaneous communication."
         ),
         evidence_level="strong",
-        age_range="18 months — adult",
+        age_range="18 months - adult",
         typical_provider="SLP or BCBA",
         reference="Bondy & Frost (1994). Focus on Autistic Behavior, 9(3), 1-19.",
     ),
@@ -235,7 +235,7 @@ INTERVENTIONS_DB = {
             "Follows child's lead in play to build social-emotional and communication skills."
         ),
         evidence_level="moderate",
-        age_range="12 months — 12 years",
+        age_range="12 months - 12 years",
         typical_provider="DIR/Floortime certified therapist",
         reference="Greenspan & Wieder (2006). Engaging Autism. Da Capo Press.",
     ),
@@ -252,14 +252,14 @@ INTERVENTIONS_DB = {
         reference="Mesibov, Shea, & Schopler (2005). The TEACCH Approach. Springer.",
     ),
     "hanen": Intervention(
-        name="Hanen — More Than Words",
+        name="Hanen - More Than Words",
         abbreviation="Hanen MTW",
         description=(
             "Parent-implemented program teaching responsive interaction strategies "
             "to promote communication in children with ASD."
         ),
         evidence_level="moderate",
-        age_range="Birth — 5 years",
+        age_range="Birth - 5 years",
         typical_provider="Hanen-certified SLP",
         reference="Sussman (1999). More Than Words. Hanen Centre.",
     ),
@@ -267,11 +267,11 @@ INTERVENTIONS_DB = {
         name="Social Thinking",
         abbreviation="ST",
         description=(
-            "Curriculum teaching the cognitive process behind social skills — "
+            "Curriculum teaching the cognitive process behind social skills - "
             "understanding others' perspectives, expected/unexpected behaviors."
         ),
         evidence_level="moderate",
-        age_range="4 years — adult",
+        age_range="4 years - adult",
         typical_provider="SLP, Psychologist, or Special Educator",
         reference="Winner (2007). Thinking About You Thinking About Me. Think Social Publishing.",
     ),
@@ -283,7 +283,7 @@ INTERVENTIONS_DB = {
             "active engagement in sensory-rich activities."
         ),
         evidence_level="moderate",
-        age_range="2 years — 12 years",
+        age_range="2 years - 12 years",
         typical_provider="OT with sensory integration certification",
         reference="Ayres (1972). Sensory Integration and Learning Disorders. Western Psychological Services.",
     ),
@@ -296,7 +296,7 @@ INTERVENTIONS_DB = {
 DOMAIN_RESOURCE_MAP = {
     "social_communication": DomainResources(
         domain="Social Communication",
-        dsm5_code="A.1 — Social-Emotional Reciprocity",
+        dsm5_code="A.1 - Social-Emotional Reciprocity",
         description="Concerns with social back-and-forth, sharing interests, and initiating/responding to social interactions.",
         specialists=[
             SPECIALIST_TYPES["child_psychologist"],
@@ -305,19 +305,19 @@ DOMAIN_RESOURCE_MAP = {
         ],
         resources=[
             Resource(
-                name="Social Communication Milestones — ASHA",
+                name="Social Communication Milestones - ASHA",
                 url="https://www.asha.org/public/speech/development/social-communication/",
                 description="Comprehensive guide to social communication development milestones.",
                 resource_type="guide",
             ),
             Resource(
-                name="Autism Speaks — Social Skills Resources",
+                name="Autism Speaks - Social Skills Resources",
                 url="https://www.autismspeaks.org/social-skills-and-autism",
                 description="Free guides, tool kits, and video resources for building social skills.",
                 resource_type="guide",
             ),
             Resource(
-                name="Hanen Centre — Parent Tips",
+                name="Hanen Centre - Parent Tips",
                 url="https://www.hanen.org/helpful-info/articles.aspx",
                 description="Free articles on supporting communication development at home.",
                 resource_type="guide",
@@ -330,17 +330,17 @@ DOMAIN_RESOURCE_MAP = {
             INTERVENTIONS_DB["social_thinking"],
         ],
         parent_tips=[
-            "Follow your child's lead during play — join what they're interested in before redirecting",
+            "Follow your child's lead during play - join what they're interested in before redirecting",
             "Narrate your actions and your child's actions during daily routines (e.g., 'I'm putting on your shoes!')",
             "Wait at least 5 seconds after speaking to give your child time to process and respond",
             "Use exaggerated facial expressions and animated speech to draw attention to your face",
             "Create opportunities for your child to communicate (e.g., place desired items out of reach)",
-            "Respond to ALL communication attempts — gestures, sounds, looks, and words all count",
+            "Respond to ALL communication attempts - gestures, sounds, looks, and words all count",
         ],
     ),
     "nonverbal_communication": DomainResources(
         domain="Nonverbal Communication",
-        dsm5_code="A.2 — Nonverbal Communicative Behaviors",
+        dsm5_code="A.2 - Nonverbal Communicative Behaviors",
         description="Concerns with eye contact, gestures, facial expressions, and body language in communication.",
         specialists=[
             SPECIALIST_TYPES["slp"],
@@ -349,13 +349,13 @@ DOMAIN_RESOURCE_MAP = {
         ],
         resources=[
             Resource(
-                name="ASHA — Eye Contact and Communication",
+                name="ASHA - Eye Contact and Communication",
                 url="https://www.asha.org/public/speech/development/",
                 description="Understanding the role of eye contact and nonverbal cues in communication development.",
                 resource_type="guide",
             ),
             Resource(
-                name="Autism Speaks — Visual Supports Tool Kit",
+                name="Autism Speaks - Visual Supports Tool Kit",
                 url="https://www.autismspeaks.org/tool-kit/visual-supports-and-autism-spectrum-disorder",
                 description="Free toolkit for using visual supports to enhance communication.",
                 resource_type="tool",
@@ -367,17 +367,17 @@ DOMAIN_RESOURCE_MAP = {
             INTERVENTIONS_DB["dir_floortime"],
         ],
         parent_tips=[
-            "Get on your child's eye level during interactions — sit on the floor or kneel down",
+            "Get on your child's eye level during interactions - sit on the floor or kneel down",
             "Hold interesting objects near your face to naturally draw eye contact",
-            "Point to things and look back at your child — model joint attention",
+            "Point to things and look back at your child - model joint attention",
             "Use gestures alongside words (wave while saying 'bye-bye', nod while saying 'yes')",
-            "Celebrate any eye contact your child makes — smile warmly and respond immediately",
-            "Don't force eye contact — build positive associations with looking at faces instead",
+            "Celebrate any eye contact your child makes - smile warmly and respond immediately",
+            "Don't force eye contact - build positive associations with looking at faces instead",
         ],
     ),
     "relationships": DomainResources(
         domain="Developing & Maintaining Relationships",
-        dsm5_code="A.3 — Developing, Maintaining, and Understanding Relationships",
+        dsm5_code="A.3 - Developing, Maintaining, and Understanding Relationships",
         description="Concerns with peer interest, imaginative play, social engagement, and adjusting behavior to social context.",
         specialists=[
             SPECIALIST_TYPES["child_psychologist"],
@@ -386,13 +386,13 @@ DOMAIN_RESOURCE_MAP = {
         ],
         resources=[
             Resource(
-                name="Autism Speaks — Making Friends",
+                name="Autism Speaks - Making Friends",
                 url="https://www.autismspeaks.org/social-skills-and-autism",
                 description="Guides for supporting friendship development in children with autism.",
                 resource_type="guide",
             ),
             Resource(
-                name="IRIS Center — Peer-Mediated Instruction",
+                name="IRIS Center - Peer-Mediated Instruction",
                 url="https://iris.peabody.vanderbilt.edu/",
                 description="Free modules on evidence-based peer interaction strategies for educators.",
                 resource_type="guide",
@@ -407,14 +407,14 @@ DOMAIN_RESOURCE_MAP = {
             "Arrange short, structured playdates with one peer at a time",
             "Choose activities with clear rules (board games, building blocks) over unstructured free play initially",
             "Practice play scenarios at home before trying them in social settings",
-            "Model pretend play — pick up a toy phone and 'call' your child, feed a stuffed animal together",
+            "Model pretend play - pick up a toy phone and 'call' your child, feed a stuffed animal together",
             "Praise specific social behaviors: 'I loved how you shared the blocks with your friend!'",
-            "Don't compare your child's social development to siblings or peers — every child's path is different",
+            "Don't compare your child's social development to siblings or peers - every child's path is different",
         ],
     ),
     "repetitive_behaviors": DomainResources(
         domain="Repetitive Behaviors & Restricted Interests",
-        dsm5_code="B.1 — Stereotyped or Repetitive Motor Movements",
+        dsm5_code="B.1 - Stereotyped or Repetitive Motor Movements",
         description="Concerns with motor stereotypies (hand flapping, body rocking), repetitive object use, or echolalia.",
         specialists=[
             SPECIALIST_TYPES["bcba"],
@@ -423,13 +423,13 @@ DOMAIN_RESOURCE_MAP = {
         ],
         resources=[
             Resource(
-                name="Autism Speaks — Repetitive Behaviors Tool Kit",
+                name="Autism Speaks - Repetitive Behaviors Tool Kit",
                 url="https://www.autismspeaks.org/tool-kit/challenging-behaviors-tool-kit",
                 description="Free guide for understanding and responding to repetitive and challenging behaviors.",
                 resource_type="tool",
             ),
             Resource(
-                name="Indiana Resource Center for Autism — Restricted Interests",
+                name="Indiana Resource Center for Autism - Restricted Interests",
                 url="https://www.iidc.indiana.edu/irca/",
                 description="Research-based information on understanding and supporting restricted interests.",
                 resource_type="guide",
@@ -441,17 +441,17 @@ DOMAIN_RESOURCE_MAP = {
             INTERVENTIONS_DB["teacch"],
         ],
         parent_tips=[
-            "Understand that stimming often serves a purpose — it may be self-regulating or enjoyable",
+            "Understand that stimming often serves a purpose - it may be self-regulating or enjoyable",
             "Only redirect repetitive behaviors that are harmful or significantly disruptive",
             "Offer alternative sensory outlets (fidget toys, chewy necklaces, movement breaks)",
-            "Use restricted interests as motivation — incorporate them into learning and social activities",
+            "Use restricted interests as motivation - incorporate them into learning and social activities",
             "Keep a log of when repetitive behaviors increase to identify triggers (tiredness, overstimulation)",
             "Work with an OT to create a sensory diet that provides regular sensory input throughout the day",
         ],
     ),
     "sensory_processing": DomainResources(
         domain="Sensory Processing",
-        dsm5_code="B.4 — Hyper- or Hyporeactivity to Sensory Input",
+        dsm5_code="B.4 - Hyper- or Hyporeactivity to Sensory Input",
         description="Concerns with over- or under-sensitivity to sounds, textures, lights, smells, or movement.",
         specialists=[
             SPECIALIST_TYPES["ot"],
@@ -466,7 +466,7 @@ DOMAIN_RESOURCE_MAP = {
                 resource_type="organization",
             ),
             Resource(
-                name="Autism Speaks — Sensory Issues",
+                name="Autism Speaks - Sensory Issues",
                 url="https://www.autismspeaks.org/sensory-issues",
                 description="Overview of sensory challenges in autism with practical strategies.",
                 resource_type="guide",
@@ -484,17 +484,17 @@ DOMAIN_RESOURCE_MAP = {
             INTERVENTIONS_DB["aba"],
         ],
         parent_tips=[
-            "Create a sensory-friendly space at home — a quiet area with soft lighting and comfort items",
+            "Create a sensory-friendly space at home - a quiet area with soft lighting and comfort items",
             "Give advance warnings before loud or overwhelming events (e.g., 'The blender will be loud')",
             "Carry a sensory kit in your bag (noise-canceling headphones, sunglasses, fidget, snack)",
-            "Respect sensory boundaries — if your child covers their ears, the sound is genuinely painful to them",
+            "Respect sensory boundaries - if your child covers their ears, the sound is genuinely painful to them",
             "Introduce new textures/foods gradually and without pressure",
-            "Work with an OT to build a 'sensory diet' — scheduled sensory activities throughout the day",
+            "Work with an OT to build a 'sensory diet' - scheduled sensory activities throughout the day",
         ],
     ),
     "auditory_response": DomainResources(
         domain="Auditory Response",
-        dsm5_code="A.1 — Social-Emotional Reciprocity",
+        dsm5_code="A.1 - Social-Emotional Reciprocity",
         description="Concerns with responding to name calls, verbal instructions, or environmental sounds.",
         specialists=[
             SPECIALIST_TYPES["audiologist"],
@@ -503,7 +503,7 @@ DOMAIN_RESOURCE_MAP = {
         ],
         resources=[
             Resource(
-                name="ASHA — Hearing Screening",
+                name="ASHA - Hearing Screening",
                 url="https://www.asha.org/public/hearing/hearing-screening/",
                 description="Information about hearing evaluations and when to seek testing.",
                 resource_type="guide",
@@ -526,7 +526,7 @@ DOMAIN_RESOURCE_MAP = {
             "Reduce background noise when communicating (turn off TV, move to quieter space)",
             "Use your child's name + pause + instruction (e.g., 'Alex... [wait for look] ...time for shoes')",
             "Pair verbal instructions with visual cues (point, gesture, show the object)",
-            "Practice name-response as a game — call name, celebrate when they look, repeat throughout the day",
+            "Practice name-response as a game - call name, celebrate when they look, repeat throughout the day",
         ],
     ),
 }
@@ -687,7 +687,7 @@ class ResourceDirectory:
                 "📄 Download and bring the Referral PDF from this app to your pediatrician appointment",
                 "📅 While waiting for evaluation, contact a Speech-Language Pathologist for initial assessment",
                 "📚 Visit AutismNavigator.com to view free video examples of early autism signs",
-                "💪 Remember: Early intervention leads to significantly better outcomes — you are doing the right thing",
+                "💪 Remember: Early intervention leads to significantly better outcomes - you are doing the right thing",
             ]
         elif combined_risk in ("MEDIUM", "Medium", "Borderline"):
             actions = [
@@ -700,7 +700,7 @@ class ResourceDirectory:
             ]
         else:
             actions = [
-                "✅ Current screening results are within typical range — no immediate action required",
+                "✅ Current screening results are within typical range - no immediate action required",
                 "👀 Continue monitoring developmental milestones at routine well-child visits",
                 "📅 If your child is under 24 months, rescreen at the 24-month well-child visit",
                 "📞 Contact your pediatrician anytime you have concerns about your child's development",

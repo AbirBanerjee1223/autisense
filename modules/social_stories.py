@@ -12,6 +12,7 @@ Reference: Gray, C. (2010). The New Social Story Book. Future Horizons.
 import os
 from typing import Optional, List, Dict
 from datetime import datetime
+from config import GEMINI_API_KEY_STORY
 
 try:
     import google.generativeai as genai
@@ -174,14 +175,15 @@ class SocialStoryGenerator:
         if not GEMINI_AVAILABLE:
             return
 
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
+        # Explicitly use the dedicated Story key
+        if not GEMINI_API_KEY_STORY:
             return
 
         try:
-            genai.configure(api_key=api_key)
+            # Configure specifically for this module
+            genai.configure(api_key=GEMINI_API_KEY_STORY)
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash",
+                model_name="gemini-2.5-flash-lite",
                 system_instruction=SOCIAL_STORY_SYSTEM_PROMPT,
             )
         except Exception:

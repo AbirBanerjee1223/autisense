@@ -9,7 +9,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, List
 
-
 REFERRAL_DIR = Path("reports")
 REFERRAL_DIR.mkdir(exist_ok=True)
 
@@ -20,8 +19,8 @@ class ReferralPDF(FPDF):
     def header(self):
         self.set_font("Helvetica", "B", 10)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 6, "AUTISENSE — Developmental Screening Referral Support Document", align="C")
-        self.ln(4)
+        self.cell(0, 6, "AUTISENSE - Developmental Screening Referral Support Document", align="C")
+        self.ln(6)
         self.set_draw_color(0, 172, 193)
         self.set_line_width(0.5)
         self.line(10, self.get_y(), 200, self.get_y())
@@ -31,7 +30,7 @@ class ReferralPDF(FPDF):
         self.set_y(-20)
         self.set_font("Helvetica", "I", 7)
         self.set_text_color(150, 150, 150)
-        self.cell(0, 4, "CONFIDENTIAL — For clinical use only", align="C")
+        self.cell(0, 4, "CONFIDENTIAL - For clinical use only", align="C")
         self.ln()
         self.cell(
             0, 4,
@@ -47,6 +46,12 @@ class ReferralGenerator:
 
     def __init__(self):
         self.pdf = None
+        
+    @staticmethod
+    def _safe_text(value) -> str:
+        """Force text into latin-1-safe output for core PDF fonts."""
+        text = str(value) if value is not None else ""
+        return text.encode("latin-1", "replace").decode("latin-1")
 
     def generate_referral(
         self,
@@ -111,7 +116,7 @@ class ReferralGenerator:
                     classification = self._classify_z(z)
                     dsm5 = self._domain_to_dsm5(domain_name)
 
-                    self.pdf.cell(80, 6, domain_name[:38], border=1)
+                    self.pdf.cell(80, 6, self._safe_text(domain_name[:38]), border=1)
                     self.pdf.cell(30, 6, f"{z:+.1f} SD", border=1, align="C")
                     self.pdf.cell(40, 6, classification, border=1, align="C")
                     self.pdf.cell(40, 6, dsm5, border=1, align="C")
@@ -123,18 +128,19 @@ class ReferralGenerator:
             deviations = getattr(cv_assessment, 'deviations', [])
             if deviations:
                 self.pdf.set_font("Helvetica", "B", 9)
-                self.pdf.cell(0, 7, "Detailed Deviation Analysis:", ln=True)
+                self.pdf.cell(0, 7, "Detailed Deviation Analysis:")
+                self.pdf.ln() # Explicit newline replaces deprecated ln=True
+                
                 self.pdf.set_font("Helvetica", "", 8)
                 for dev in deviations:
                     z_val = getattr(dev, 'z_score', 0)
                     name = getattr(dev, 'domain_name', 'Unknown')
                     interp = getattr(dev, 'interpretation', '')
                     sig = getattr(dev, 'clinical_significance', 'typical')
-                    bullet = "▲" if sig == "atypical" else "●" if sig == "borderline" else "○"
-                    self.pdf.multi_cell(
-                        0, 5,
-                        f"  {bullet} {name} ({z_val:+.1f} SD) — {interp}"
-                    )
+                    bullet = "^" if sig == "atypical" else "*" if sig == "borderline" else "o"
+                    
+                    self.pdf.set_x(self.pdf.l_margin) # Guarantee cursor is at the left
+                    self.pdf.multi_cell(0, 5, self._safe_text(f"  {bullet} {name} ({z_val:+.1f} SD) - {interp}"))
                 self.pdf.ln(2)
 
         # ── M-CHAT-R Results ──
@@ -151,7 +157,8 @@ class ReferralGenerator:
 
             if mchat_result.risk_items:
                 self.pdf.set_font("Helvetica", "B", 9)
-                self.pdf.cell(0, 6, "At-Risk Items:", ln=True)
+                self.pdf.cell(0, 6, "At-Risk Items:")
+                self.pdf.ln()
                 self.pdf.set_font("Helvetica", "", 8)
 
                 from modules.mchat import MCHAT_QUESTIONS
@@ -159,10 +166,8 @@ class ReferralGenerator:
                     q = next((q for q in MCHAT_QUESTIONS if q["id"] == qid), None)
                     if q:
                         critical_tag = " [CRITICAL]" if q["critical"] else ""
-                        self.pdf.multi_cell(
-                            0, 5,
-                            f"  Q{qid}{critical_tag} ({q['domain']}): {q['text']}"
-                        )
+                        self.pdf.set_x(self.pdf.l_margin)
+                        self.pdf.multi_cell(0, 5, self._safe_text(f"  Q{qid}{critical_tag} ({q['domain']}): {q['text']}"))
             self.pdf.ln(2)
 
         # ── Combined Assessment ──
@@ -173,10 +178,8 @@ class ReferralGenerator:
             self.pdf.ln(2)
 
             self.pdf.set_font("Helvetica", "", 9)
-            self.pdf.multi_cell(
-                0, 5,
-                f"Recommendation: {combined_summary.get('combined_recommendation', '')}"
-            )
+            self.pdf.set_x(self.pdf.l_margin)
+            self.pdf.multi_cell(0, 5, self._safe_text(f"Recommendation: {combined_summary.get('combined_recommendation', '')}"))
             self.pdf.ln(3)
 
         # ── Clinical Recommendations ──
@@ -184,7 +187,8 @@ class ReferralGenerator:
         recommendations = self._build_recommendations(cv_assessment, mchat_result, combined_summary)
         self.pdf.set_font("Helvetica", "", 9)
         for i, rec in enumerate(recommendations, 1):
-            self.pdf.multi_cell(0, 5, f"  {i}. {rec}")
+            self.pdf.set_x(self.pdf.l_margin)
+            self.pdf.multi_cell(0, 5, self._safe_text(f"  {i}. {rec}"))
             self.pdf.ln(1)
 
         # ── Suggested Specialist Referrals ──
@@ -192,7 +196,8 @@ class ReferralGenerator:
         specialists = self._build_specialist_list(cv_assessment, mchat_result)
         self.pdf.set_font("Helvetica", "", 9)
         for spec in specialists:
-            self.pdf.multi_cell(0, 5, f"  • {spec['type']} — {spec['reason']}")
+            self.pdf.set_x(self.pdf.l_margin)
+            self.pdf.multi_cell(0, 5, self._safe_text(f"  * {spec['type']} - {spec['reason']}"))
         self.pdf.ln(3)
 
         # ── Methodology & Disclaimers ──
@@ -215,7 +220,8 @@ class ReferralGenerator:
             "such as the ADOS-2 and ADI-R. This referral support document is intended to assist "
             "clinical decision-making, not replace it."
         )
-        self.pdf.multi_cell(0, 4, methodology_text)
+        self.pdf.set_x(self.pdf.l_margin)
+        self.pdf.multi_cell(0, 4, self._safe_text(methodology_text))
 
         # ── Save ──
         filename = f"referral_{ref_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -228,7 +234,8 @@ class ReferralGenerator:
     def _section_header(self, title: str):
         self.pdf.set_font("Helvetica", "B", 11)
         self.pdf.set_text_color(0, 90, 120)
-        self.pdf.cell(0, 8, title, ln=True)
+        self.pdf.cell(0, 8, self._safe_text(title))
+        self.pdf.ln()
         self.pdf.set_draw_color(0, 172, 193)
         self.pdf.set_line_width(0.3)
         self.pdf.line(10, self.pdf.get_y(), 200, self.pdf.get_y())
@@ -237,9 +244,10 @@ class ReferralGenerator:
 
     def _info_row(self, label: str, value: str):
         self.pdf.set_font("Helvetica", "B", 9)
-        self.pdf.cell(60, 6, f"{label}:")
+        self.pdf.cell(60, 6, self._safe_text(f"{label}:"))
         self.pdf.set_font("Helvetica", "", 9)
-        self.pdf.cell(0, 6, value, ln=True)
+        self.pdf.cell(0, 6, self._safe_text(value))
+        self.pdf.ln()
 
     def _classify_z(self, z: float) -> str:
         z_abs = abs(z)
@@ -270,7 +278,7 @@ class ReferralGenerator:
         for key, code in mapping.items():
             if key in name_lower:
                 return code
-        return "—"
+        return "-"
 
     def _build_recommendations(self, cv_assessment, mchat_result, combined_summary) -> List[str]:
         recs = []
@@ -287,7 +295,7 @@ class ReferralGenerator:
             recs.extend([
                 "Refer for comprehensive developmental evaluation (ADOS-2/ADI-R)",
                 "Refer for audiological evaluation to rule out hearing impairment",
-                "Initiate early intervention services — do not wait for formal diagnosis",
+                "Initiate early intervention services - do not wait for formal diagnosis",
                 "Connect family with state Early Intervention (Part C) program",
                 "Refer to speech-language pathologist for communication assessment",
                 "Schedule follow-up appointment within 30 days to confirm referral completion",
